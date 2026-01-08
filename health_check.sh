@@ -18,12 +18,12 @@ for NODE in "${NODES[@]}"; do
     fi
 
     # SSH test
-    if ssh -o ConnectTimeout=5 node$i "uptime" &>/dev/null; then
+    if ssh -o ConnectTimeout=5 node$i "exit" </dev/null &>/dev/null; then
         echo "  SSH: OK"
-        ssh node$i "hostname && uptime"
     else
         echo "  SSH: FAIL"
     fi
+
 
 
   echo
