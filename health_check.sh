@@ -18,9 +18,8 @@ for NODE in "${NODES[@]}"; do
   fi
 
   # SSH test
-  if ssh -o BatchMode=yes -o ConnectTimeout=5 cluster@"$NODE" "uptime" &>/dev/null; then
+  if ssh -q -o BatchMode=yes -o ConnectTimeout=5 "$NODE" true; then
     echo "  SSH: OK"
-    ssh cluster@"$NODE" "uptime"
   else
     echo "  SSH: FAIL"
   fi
