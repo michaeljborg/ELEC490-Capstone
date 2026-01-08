@@ -1,3 +1,5 @@
+#!/bin/bash
+
 NODES=(node2 node3 node4 node5 node6)
 
 echo "=== Cluster Health Check ==="
