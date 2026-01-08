@@ -9,21 +9,22 @@ echo
 for NODE in "${NODES[@]}"; do
   echo ">>> $NODE"
 
-  # Ping test
-  if ping -c 1 -W 1 "$NODE" &>/dev/null; then
-    echo "  Ping: OK"
-  else
-    echo "  Ping: FAIL"
+    # Ping test
+    if ping -c 1 -W 1 "$NODE" &>/dev/null; then
+        echo "  Ping: OK"
+    else
+        echo "  Ping: FAIL"
     continue
-  fi
+    fi
 
-  # SSH test
-  if ssh -o BatchMode=yes -o ConnectTimeout=5 cluster@"$NODE" "uptime" &>/dev/null; then
-    echo "  SSH: OK"
-    ssh cluster@"$NODE" "uptime"
-  else
-    echo "  SSH: FAIL"
-  fi
+    # SSH test
+    if ssh -o ConnectTimeout=5 node$i "uptime" &>/dev/null; then
+        echo "  SSH: OK"
+        ssh node$i "hostname && uptime"
+    else
+        echo "  SSH: FAIL"
+    fi
+
 
   echo
 done
