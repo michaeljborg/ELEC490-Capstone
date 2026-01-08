@@ -25,6 +25,12 @@ for NODE in "${NODES[@]}"; do
     fi
 
 
+  # SSH test
+  if ssh -q -o BatchMode=yes -o ConnectTimeout=5 "$NODE" true; then
+    echo "  SSH: OK"
+  else
+    echo "  SSH: FAIL"
+  fi
 
   echo
 done
