@@ -9,7 +9,7 @@ app = FastAPI()
 
 # ---- CONFIG ----
 PATH_TO_SCRIPT = "/home/cluster/ELEC490-Capstone"  # directory on node2/node3 containing script.py
-NODES = ["node2", "node3"]
+NODES = ["node2", "node3", "node4", "node5"]
 # ----------------
 
 EXECUTOR = ThreadPoolExecutor(max_workers=32)
@@ -20,13 +20,32 @@ LOCKS = {node: asyncio.Lock() for node in NODES}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return """
+    # Build buttons dynamically from NODES
+    relay_buttons = "\n".join(
+        f"""<button onclick="post('/relay/{node}')">Run relay() on {node}</button>"""
+        for node in NODES
+    )
+
+    ping_buttons = "\n".join(
+        f"""<button onclick="post('/ping/{node}')">Ping {node}</button>"""
+        for node in NODES
+    )
+
+    queue_buttons = "\n".join(
+        f"""<button onclick="streamQueue('{node}', 5)">Queue 5 relays ({node})</button>"""
+        for node in NODES
+    )
+
+    # Render a JS array for "all nodes" action
+    nodes_js_array = "[" + ",".join(f"'{n}'" for n in NODES) + "]"
+
+    return f"""
     <!DOCTYPE html>
     <html>
     <head>
       <title>Relay GUI</title>
       <style>
-        body {
+        body {{
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -34,89 +53,99 @@ def home():
           height: 100vh;
           font-family: Arial, sans-serif;
           gap: 12px;
-        }
-        .row {
+        }}
+        .row {{
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
           justify-content: center;
-        }
-        button {
+        }}
+        button {{
           font-size: 18px;
           padding: 12px 18px;
           cursor: pointer;
-        }
-        #output {
-          width: 75%;
-          height: 360px;
+        }}
+        #output {{
+          width: 80%;
+          height: 420px;
           border: 1px solid #ccc;
           padding: 10px;
           overflow-y: auto;
           font-family: monospace;
           white-space: pre-wrap;
           background: #f9f9f9;
-        }
+        }}
       </style>
 
       <script>
-        function appendLine(line) {
+        const NODES = {nodes_js_array};
+
+        function appendLine(line) {{
           const box = document.getElementById("output");
           box.textContent += line + "\\n";
           box.scrollTop = box.scrollHeight;
-        }
+        }}
 
-        async function post(path) {
-          try {
-            const res = await fetch(path, { method: "POST" });
+        async function post(path) {{
+          try {{
+            const res = await fetch(path, {{ method: "POST" }});
             const data = await res.json();
             if (data.ok) appendLine(data.line);
             else appendLine("Error: " + data.error);
-          } catch (e) {
+          }} catch (e) {{
             appendLine("Error: " + e);
-          }
-        }
+          }}
+        }}
 
         // Stream queue output live (Server-Sent Events)
-        function streamQueue(node, n) {
+        function streamQueue(node, n) {{
           appendLine("--- starting stream for " + node + " (n=" + n + ") ---");
-
           const es = new EventSource("/queue_stream/" + node + "?n=" + n);
 
-          es.onmessage = (ev) => {
+          es.onmessage = (ev) => {{
             appendLine(ev.data);
 
             // Auto-close once done/aborted
             if (ev.data.indexOf("--- Finished queue on " + node + " ---") !== -1 ||
                 ev.data.indexOf("--- Aborted on " + node + ":") !== -1 ||
                 ev.data.indexOf("Unknown node:") !== -1 ||
-                ev.data.indexOf("n must be between") !== -1) {
+                ev.data.indexOf("n must be between") !== -1) {{
               es.close();
               appendLine("--- stream closed for " + node + " ---");
-            }
-          };
+            }}
+          }};
 
-          es.onerror = () => {
+          es.onerror = () => {{
             appendLine("(stream error on " + node + ")");
             es.close();
-          };
-        }
+          }};
+        }}
+
+        // NEW: queue 5 relays on every node (each node runs sequentially due to server lock)
+        function streamQueueAll(n=5) {{
+          appendLine("=== Queueing " + n + " relays on ALL nodes: " + NODES.join(", ") + " ===");
+          for (const node of NODES) {{
+            streamQueue(node, n);
+          }}
+        }}
       </script>
     </head>
 
     <body>
       <div class="row">
-        <button onclick="post('/relay/node2')">Run relay() on node2</button>
-        <button onclick="post('/relay/node3')">Run relay() on node3</button>
+        {relay_buttons}
       </div>
 
       <div class="row">
-        <button onclick="streamQueue('node2', 5)">Queue 5 relays (node2)</button>
-        <button onclick="streamQueue('node3', 5)">Queue 5 relays (node3)</button>
+        {queue_buttons}
       </div>
 
       <div class="row">
-        <button onclick="post('/ping/node2')">Ping node2</button>
-        <button onclick="post('/ping/node3')">Ping node3</button>
+        <button onclick="streamQueueAll(5)">Queue 5 relays on ALL nodes</button>
+      </div>
+
+      <div class="row">
+        {ping_buttons}
       </div>
 
       <div id="output"></div>
@@ -126,7 +155,6 @@ def home():
 
 
 def ssh_relay(node: str) -> str:
-    # Runs python on remote node and prints relay() result.
     remote_cmd = f'cd "{PATH_TO_SCRIPT}" && python3 -c "import script; print(script.relay())"'
     proc = subprocess.run(
         ["ssh", node, remote_cmd],
@@ -163,7 +191,6 @@ async def relay(node: str):
     if node not in NODES:
         return {"ok": False, "error": f"Unknown node: {node}"}
 
-    # Per-node queueing
     async with LOCKS[node]:
         try:
             value = await run_in_pool(ssh_relay, node)
@@ -186,7 +213,6 @@ async def ping(node: str):
 
 @app.get("/queue_stream/{node}")
 async def queue_stream(node: str, n: int = 5):
-    # SSE streaming endpoint for live queue output
     def sse(text: str) -> str:
         return f"data: {text}\n\n"
 
@@ -205,7 +231,6 @@ async def queue_stream(node: str, n: int = 5):
             yield sse(f"--- Queueing {n} relays on {node} ---")
             try:
                 for i in range(1, n + 1):
-                    yield sse(f"[{node}] starting {i}/{n}...")
                     value = await run_in_pool(ssh_relay, node)
                     yield sse(f"{node.capitalize()} [{i}/{n}]: {value}")
                 yield sse(f"--- Finished queue on {node} ---")
