@@ -4,6 +4,9 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import time
+import shlex
+import json
+import node_interface_ip
 
 app = FastAPI()
 
@@ -148,14 +151,39 @@ def home():
         {ping_buttons}
       </div>
 
+      <div class="row">
+        <button onclick="post('/start_inference_all')">
+          Start inference on ALL nodes
+        </button>
+      </div>
+
       <div id="output"></div>
     </body>
     </html>
     """
 
 
+import json
+import base64
+import subprocess
+
 def ssh_relay(node: str) -> str:
-    remote_cmd = f'cd "{PATH_TO_SCRIPT}" && python3 -c "import script; print(script.relay())"'
+    payload = {
+        "ip": node,
+        "model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "prompt": "give me a recipe to bake a chocolate cake",
+    }
+
+    # base64 encode JSON so the shell can't mess with it
+    b64 = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+
+    remote_cmd = (
+        f'cd "{PATH_TO_SCRIPT}" && '
+        f'python3 -c "import base64, json, node_interface_ip; '
+        f'd=json.loads(base64.b64decode(\'{b64}\').decode(\'utf-8\')); '
+        f'print(node_interface_ip.query(**d))"'
+    )
+
     proc = subprocess.run(
         ["ssh", node, remote_cmd],
         capture_output=True,
@@ -166,6 +194,9 @@ def ssh_relay(node: str) -> str:
         raise RuntimeError(proc.stderr.strip() or "SSH command failed")
     return proc.stdout.strip()
 
+def start_local_inference(node):
+    # runs on the SAME node as FastAPI
+    return node_interface_ip.start(node)
 
 def ping_node(node: str) -> str:
     start = time.time()
@@ -238,3 +269,37 @@ async def queue_stream(node: str, n: int = 5):
                 yield sse(f"--- Aborted on {node}: {e} ---")
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+@app.post("/start_inference/{node}")
+async def start_inference_one(node: str):
+    if node not in NODES:
+        return {"ok": False, "error": f"Unknown node: {node}"}
+    try:
+        value = await run_in_pool(start_local_inference, node)
+        return {"ok": True, "line": f"Start {node}: {value}"}
+    except Exception as e:
+        return {"ok": False, "error": f"{node}: {e}"}
+
+
+@app.post("/start_inference_all")
+async def start_inference_all():
+    # fire them all concurrently
+    async def start_one(n: str):
+        try:
+            v = await run_in_pool(start_local_inference, n)
+            return (n, True, str(v))
+        except Exception as e:
+            return (n, False, str(e))
+
+    results = await asyncio.gather(*(start_one(n) for n in NODES))
+
+    # Build a multi-line response for your output box
+    lines = ["=== Start inference ALL ==="]
+    for n, ok, msg in results:
+        if ok:
+            lines.append(f"Start {n}: {msg}")
+        else:
+            lines.append(f"Start {n}: ERROR: {msg}")
+    lines.append("=== Done ===")
+
+    return {"ok": True, "line": "\n".join(lines)}
