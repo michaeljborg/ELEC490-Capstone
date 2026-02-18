@@ -113,10 +113,19 @@ ws.onmessage = (event) => {
 
     // Update per-node in-flight counts
     NODE_POOL.forEach(node => {
-        const element = document.getElementById("count-" + node);
-        const n = (status.in_flight && status.in_flight[node]) ? status.in_flight[node] : 0;
-        if (element) element.innerText = n;
-    });
+    const element = document.getElementById("status-" + node);
+    const inUse = status.in_flight && status.in_flight[node] > 0;
+
+    if (!element) return;
+
+    if (inUse) {
+        element.innerText = "In Use";
+        element.style.color = "rgb(255, 0, 0)";  // full red
+    } else {
+        element.innerText = "Free";
+        element.style.color = "rgb(0, 255, 0)";  // full green
+    }
+});
 
     // Queue depth + user count
     const q = document.getElementById("queue-depth");
@@ -200,7 +209,7 @@ async function spam50() {
     {% for node in node_pool %}
     <div class="node-item">
         <strong>{{ node.upper() }}:</strong> 
-        <span><span id="count-{{ node }}">0</span> In-Flight</span>
+        <span id="status-{{ node }}">Free</span>
     </div>
     {% endfor %}
 </div>
