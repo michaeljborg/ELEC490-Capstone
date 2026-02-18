@@ -103,23 +103,27 @@ button {
 </style>
 
 <script>
-// Data injected by the Python backend
-const ASSIGNED_NODE = "{{ assigned_node }}";
 const NODE_POOL = {{ node_pool_json | safe }};
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${protocol}//${window.location.host}/ws/occupancy/${ASSIGNED_NODE}`);
+const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
 ws.onmessage = (event) => {
-    const counts = JSON.parse(event.data);
+    const status = JSON.parse(event.data);
 
+    // Update per-node in-flight counts
     NODE_POOL.forEach(node => {
         const element = document.getElementById("count-" + node);
-        if (element) element.innerText = counts[node] || 0;
+        const n = (status.in_flight && status.in_flight[node]) ? status.in_flight[node] : 0;
+        if (element) element.innerText = n;
     });
 
-    const myCount = counts[ASSIGNED_NODE] || 0;
-    document.getElementById("my-occ-count").innerText = myCount;
+    // Queue depth + user count
+    const q = document.getElementById("queue-depth");
+    if (q) q.innerText = status.queue_depth ?? 0;
+
+    const u = document.getElementById("user-count");
+    if (u) u.innerText = status.total_users ?? 0;
 };
 
 function appendLine(line) {
@@ -133,21 +137,53 @@ async function sendQuery() {
     const prompt = document.getElementById("userPrompt").value;
     if (!prompt) return alert("Please enter a prompt.");
 
-    appendLine("Dispatching to " + ASSIGNED_NODE + "...");
+    const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
 
     try {
-        const res = await fetch("/relay/" + ASSIGNED_NODE, {
+        // 1) Enqueue and get queue position
+        const enq = await fetch("/enqueue", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ "prompt": prompt })
+            body: JSON.stringify({ prompt, job_id })
         });
+        const enqData = await enq.json();
 
+        if (!enqData.ok) {
+            appendLine("ERROR: " + enqData.error);
+            return;
+        }
+
+        appendLine(`Queued prompt (FIFO). ${enqData.ahead} ahead of you. Waiting for dispatch...`);
+
+        // 2) Wait for completion
+        const res = await fetch("/wait/" + encodeURIComponent(job_id));
         const data = await res.json();
-        appendLine(data.ok ? "RESPONSE: " + data.line : "ERROR: " + data.error);
+
+        if (data.ok) {
+            appendLine("RESPONSE [" + data.node + "]: " + data.line);
+        } else {
+            appendLine("ERROR: " + data.error);
+        }
+
     } catch (e) {
         appendLine("FETCH ERROR: " + e.message);
     }
 }
+
+async function spam50() {
+    appendLine("Requesting server to enqueue 50 prompts...");
+    try {
+        const res = await fetch("/spam50", { method: "POST" });
+        const data = await res.json();
+        appendLine(data.ok
+            ? `Server enqueued ${data.enqueued} prompts. Queue ahead before enqueue: ${data.ahead_before}`
+            : `ERROR: ${data.error}`);
+    } catch (e) {
+        appendLine("FETCH ERROR: " + e.message);
+    }
+}
+
+
 </script>
 </head>
 
@@ -158,7 +194,7 @@ async function sendQuery() {
     {% for node in node_pool %}
     <div class="node-item">
         <strong>{{ node.upper() }}:</strong> 
-        <span><span id="count-{{ node }}">0</span> Users</span>
+        <span><span id="count-{{ node }}">0</span> In-Flight</span>
     </div>
     {% endfor %}
 </div>
@@ -167,18 +203,18 @@ async function sendQuery() {
     <h2>LLM Cluster Interface</h2>
 
     <div class="status-card">
-        <div><strong>Your Assigned Node:</strong>
-            <span class="highlight">{{ assigned_node.upper() }}</span>
+        <div><strong>Queue Depth:</strong>
+            <span id="queue-depth" class="highlight">0</span>
         </div>
-        <div>
-            <strong>Active Users on Your Node:</strong>
-            <span id="my-occ-count" class="highlight">1</span>
+        <div><strong>Connected Users:</strong>
+            <span id="user-count" class="highlight">0</span>
         </div>
     </div>
 
     <div class="row">
         <input type="text" id="userPrompt" placeholder="Enter prompt..." onkeydown="if(event.key==='Enter') sendQuery()">
         <button onclick="sendQuery()">Run Query</button>
+        <button onclick="spam50()">Spam 50</button>
     </div>
 
     <div id="output"></div>

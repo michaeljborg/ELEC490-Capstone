@@ -74,7 +74,7 @@ def query(ip, model, prompt, timeout=60):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 200,
+        "max_tokens": 1024,
         "temperature": 0.7,
     }
 
