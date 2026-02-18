@@ -171,17 +171,23 @@ async function sendQuery() {
 }
 
 async function spam50() {
-    appendLine("Requesting server to enqueue 50 prompts...");
-    try {
-        const res = await fetch("/spam50", { method: "POST" });
-        const data = await res.json();
-        appendLine(data.ok
-            ? `Server enqueued ${data.enqueued} prompts. Queue ahead before enqueue: ${data.ahead_before}`
-            : `ERROR: ${data.error}`);
-    } catch (e) {
-        appendLine("FETCH ERROR: " + e.message);
-    }
-}
+  appendLine("Requesting server to enqueue 50 prompts...");
+
+  const res = await fetch("/spam50", { method: "POST" });
+  const info = await res.json();
+  if (!info.ok) { appendLine("ERROR: " + info.error); return; }
+
+  appendLine(`Enqueued 50. ~${info.ahead_before} ahead in system. Waiting for results...`);
+
+  for (const job_id of info.job_ids) {
+    const r = await fetch("/wait/" + encodeURIComponent(job_id));
+    const data = await r.json();
+    if (data.ok) appendLine(`RESPONSE [${data.node}]: ${data.line}`);
+    else appendLine(`ERROR (${job_id}): ${data.error}`);
+  }
+
+  appendLine("spam50 done.");
+}   
 
 
 </script>

@@ -270,14 +270,17 @@ SPAM_PROMPTS_50 = [
 async def spam50():
     loop = asyncio.get_running_loop()
 
-    # Optional: how many were already waiting (simple snapshot)
-    ahead_before = JOB_QUEUE.qsize()
+    job_ids = []
+    ahead_before = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
 
     for i, p in enumerate(SPAM_PROMPTS_50, start=1):
-        fut = loop.create_future()  # we won't await it; it's fine
-        job_id = f"spam-{i}"
-        prompt = f"SPAMTEST {i}/50\n{p}"
+        fut = loop.create_future()
+        job_id = f"spam-{i}-{int(loop.time()*1000)}"  # avoid collisions
+        prompt = p
+
+        PENDING[job_id] = fut
         await JOB_QUEUE.put((job_id, prompt, fut))
+        job_ids.append(job_id)
 
     await broadcast_status()
-    return {"ok": True, "enqueued": 50, "ahead_before": ahead_before}
+    return {"ok": True, "enqueued": 50, "ahead_before": ahead_before, "job_ids": job_ids}
