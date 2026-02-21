@@ -5,7 +5,6 @@ import json
 import platform
 from datetime import datetime
 
-
 DURATION_SECONDS = 60
 INTERVAL = 1
 OUTPUT_FILE = "monitor_output.txt"
