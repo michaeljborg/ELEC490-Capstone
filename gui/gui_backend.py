@@ -19,11 +19,15 @@ PENDING: dict[str, asyncio.Future] = {}
 
 # ---- CONFIG ----
 PATH_TO_SCRIPT = "/home/cluster/ELEC490-Capstone"
-NODE_POOL = ["node2", "node3", "node4"]
+MONITOR_PYTHON = "/home/cluster/vllm-venv/bin/python"
+NODE_POOL = ["node2", "node3", "node4", "node5"]
 # Monitoring
 MONITOR_PORT = 5000
 METRICS_SAMPLES_CAP = 60  # last N samples per node for live charts
-METRICS_LOG_PATH = Path("metrics_log.jsonl")  # persistent log for reports
+METRICS_LOG_DIR = Path(PATH_TO_SCRIPT) / "monitor" / "log"  # one <node>.jsonl per node
+# Optional: if SSH from headnode uses different hostnames, map logical name -> SSH hostname
+# e.g. {"node3": "Group15Cluster-3", "node4": "Group15Cluster-4"} when "node3" doesn't resolve
+MONITOR_SSH_HOSTS = {}  # default: use NODE_POOL name as SSH hostname
 # ----------------
 
 WAITING_FOR_NODE = 0
@@ -76,7 +80,9 @@ def _metrics_listener():
                             _metrics_store[node_name] = deque(maxlen=METRICS_SAMPLES_CAP)
                         _metrics_store[node_name].append(metrics)
                     try:
-                        with open(METRICS_LOG_PATH, "a") as f:
+                        METRICS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+                        log_file = METRICS_LOG_DIR / f"{node_name}.jsonl"
+                        with open(log_file, "a") as f:
                             f.write(json.dumps(metrics) + "\n")
                     except Exception:
                         pass
@@ -160,7 +166,7 @@ def ssh_relay(node: str, prompt: str) -> str:
     b64 = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
 
     remote_cmd = (
-        f'cd "{PATH_TO_SCRIPT}" && '
+        f'cd "{PATH_TO_SCRIPT}/gui" && '
         f'python3 -c "import base64, json, node_interface_ip; '
         f'd=json.loads(base64.b64decode(\'{b64}\').decode(\'utf-8\')); '
         f'print(node_interface_ip.query(**d))"'
@@ -269,24 +275,45 @@ async def wait(job_id: str):
 
 # ---- Monitoring API ----
 def _ssh_start_monitor_agent(node: str) -> bool:
-    """Start monitor_agent on one node via SSH + tmux. Returns True on success."""
+    ssh_host = MONITOR_SSH_HOSTS.get(node, node)
+    py = MONITOR_PYTHON.strip()
+
     remote_cmd = (
-        f'tmux kill-session -t monitor 2>/dev/null || true; '
-        f'cd "{PATH_TO_SCRIPT}" && tmux new-session -d -s monitor "python3 monitor/monitor_agent.py"'
+        f"tmux kill-session -t monitor 2>/dev/null || true; "
+        f"tmux new-session -d -s monitor "
+        f"'{py} {PATH_TO_SCRIPT}/monitor/monitor_agent.py'"
     )
+
     proc = subprocess.run(
-        ["ssh", "-o", "ConnectTimeout=5", node, remote_cmd],
+        ["ssh", "-o", "ConnectTimeout=5", ssh_host, remote_cmd],
         capture_output=True,
         text=True,
         timeout=15,
     )
+
+    if proc.returncode != 0:
+        print("STDERR:", proc.stderr)
+
     return proc.returncode == 0
+
+
+def _check_agent_running(node: str) -> bool:
+    """Return True if monitor_agent.py process is running on the node."""
+    ssh_host = MONITOR_SSH_HOSTS.get(node, node)
+    proc = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=3", ssh_host, "pgrep -f 'monitor/monitor_agent.py'"],
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    return proc.returncode == 0 and bool(proc.stdout.strip())
 
 
 def _ssh_stop_monitor_agent(node: str) -> bool:
     """Stop monitor_agent on one node. Returns True on success."""
+    ssh_host = MONITOR_SSH_HOSTS.get(node, node)
     proc = subprocess.run(
-        ["ssh", "-o", "ConnectTimeout=5", node, "tmux kill-session -t monitor 2>/dev/null || true"],
+        ["ssh", "-o", "ConnectTimeout=5", ssh_host, "tmux kill-session -t monitor 2>/dev/null || true"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -300,14 +327,58 @@ async def monitoring_start():
     global _monitoring_agents_started
     loop = asyncio.get_running_loop()
     results = {}
+    errors = {}
     for node in NODE_POOL:
         try:
-            ok = await loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
+            ok, err = await loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
             results[node] = ok
+            if err:
+                errors[node] = err
         except Exception as e:
             results[node] = False
+            errors[node] = str(e)
     _monitoring_agents_started = any(results.values())
-    return {"ok": True, "agents": results, "monitoring_active": _monitoring_agents_started}
+    return {"ok": True, "agents": results, "agent_errors": errors, "monitoring_active": _monitoring_agents_started}
+
+
+@app.get("/api/monitoring/agent-status")
+async def monitoring_agent_status():
+    """Which nodes currently have the monitor agent process running (after Start)."""
+    loop = asyncio.get_running_loop()
+    status = {}
+    for node in NODE_POOL:
+        try:
+            status[node] = await loop.run_in_executor(EXECUTOR, _check_agent_running, node)
+        except Exception:
+            status[node] = False
+    return {"nodes": status}
+
+
+def _diagnose_node(node: str) -> str:
+    """Run the agent on the node for 2s and return stdout+stderr (to see why it exits)."""
+    ssh_host = MONITOR_SSH_HOSTS.get(node, node)
+    remote_cmd = (
+        f'bash -lc \'cd "{PATH_TO_SCRIPT}" && timeout 2 python3 monitor/monitor_agent.py 2>&1\' || true'
+    )
+    proc = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=5", ssh_host, remote_cmd],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    return (out + "\n" + err).strip() or "(no output)"
+
+
+@app.get("/api/monitoring/diagnose")
+async def monitoring_diagnose(node: str):
+    """Run the agent briefly on the given node and return its output (traceback, etc.)."""
+    if node not in NODE_POOL:
+        return {"ok": False, "error": "unknown node"}
+    loop = asyncio.get_running_loop()
+    output = await loop.run_in_executor(EXECUTOR, _diagnose_node, node)
+    return {"ok": True, "node": node, "output": output}
 
 
 @app.post("/api/monitoring/stop")
@@ -340,7 +411,7 @@ async def get_metrics():
     return {
         "by_node": by_node,
         "monitoring_active": _monitoring_agents_started,
-        "log_path": str(METRICS_LOG_PATH),
+        "log_path": str(METRICS_LOG_DIR),
     }
 
 

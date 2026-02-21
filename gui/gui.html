@@ -101,26 +101,14 @@ button {
     color: #38bdf8;
 }
 
-.tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 20px;
-}
-.tabs button {
-    padding: 10px 20px;
-    border-radius: 10px;
-    background: transparent;
+.monitoring-panel {
+    width: 380px;
+    background: var(--panel);
+    backdrop-filter: blur(14px);
+    border-radius: 18px;
+    padding: 35px;
     border: 1px solid var(--border);
-    color: var(--muted);
-    cursor: pointer;
 }
-.tabs button.active {
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
-    color: white;
-    border-color: transparent;
-}
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
 
 .monitoring-controls {
     display: flex;
@@ -248,19 +236,9 @@ async function spam50() {
   appendLine("spam50 done.");
 }
 
-function showTab(name) {
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-    const panel = document.getElementById('tab-' + name);
-    const btn = document.querySelector('.tabs button[data-tab="' + name + '"]');
-    if (panel) panel.classList.add('active');
-    if (btn) btn.classList.add('active');
-    if (name === 'monitoring') {
-        refreshMetrics();
-        if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
-    } else {
-        if (metricsPollTimer) { clearInterval(metricsPollTimer); metricsPollTimer = null; }
-    }
+function initMonitoringPanel() {
+    refreshMetrics();
+    if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
 }
 
 async function startMonitoring() {
@@ -274,6 +252,8 @@ async function stopMonitoring() {
     const res = await fetch('/api/monitoring/stop', { method: 'POST' });
     await res.json();
     document.getElementById('monitoring-status-text').innerText = 'Stopped';
+    const resultEl = document.getElementById('monitoring-start-result');
+    if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
     refreshMetrics();
 }
 
@@ -306,10 +286,10 @@ async function refreshMetrics() {
     }
     container.innerHTML = html;
     const logEl = document.getElementById('metrics-log-path');
-    if (logEl) logEl.innerText = data.log_path || 'metrics_log.jsonl';
+    if (logEl) logEl.innerText = 'monitor/log/<node>.jsonl (one file per node)';
 }
 
-
+document.addEventListener('DOMContentLoaded', initMonitoringPanel);
 </script>
 </head>
 
@@ -327,12 +307,6 @@ async function refreshMetrics() {
 
 <div class="main-panel">
     <h2>Cluster Control Panel</h2>
-    <div class="tabs">
-        <button class="active" data-tab="inference" onclick="showTab('inference')">Inference</button>
-        <button data-tab="monitoring" onclick="showTab('monitoring')">Monitoring</button>
-    </div>
-
-    <div id="tab-inference" class="tab-panel active">
     <div class="status-card">
         <div><strong>Queue Depth:</strong>
             <span id="queue-depth" class="highlight">0</span>
@@ -349,17 +323,19 @@ async function refreshMetrics() {
     </div>
 
     <div id="output"></div>
-    </div>
+</div>
 
-    <div id="tab-monitoring" class="tab-panel">
-        <div class="monitoring-controls">
-            <button onclick="startMonitoring()">Start Monitoring</button>
-            <button onclick="stopMonitoring()">Stop Monitoring</button>
-            <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
-        </div>
-        <div id="metrics-container" class="metrics-grid"></div>
-        <p class="log-note">Metrics are appended to <span id="metrics-log-path">metrics_log.jsonl</span> for future reports. Last {{ METRICS_SAMPLES_CAP }} samples per node are kept in memory for live charts.</p>
+<div class="monitoring-panel">
+    <h3 style="margin-top:0">Cluster Monitoring</h3>
+    <div class="monitoring-controls">
+        <button onclick="startMonitoring()">Start Monitoring</button>
+        <button onclick="stopMonitoring()">Stop Monitoring</button>
+        <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
     </div>
+    <div id="monitoring-start-result" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:13px;"></div>
+    <div id="monitoring-diagnose-output" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:12px;"></div>
+    <div id="metrics-container" class="metrics-grid"></div>
+    <p class="log-note">Metrics are appended to <span id="metrics-log-path">monitor/log/</span> (one <code>&lt;node&gt;.jsonl</code> per node). Last {{ METRICS_SAMPLES_CAP }} samples per node are kept in memory for live charts.</p>
 </div>
 
 </body>
