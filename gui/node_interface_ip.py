@@ -16,29 +16,26 @@ def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
     port = 8000
     max_num_seqs = 32
 
-    remote_cmd = f"""
-    tmux kill-session -t {tmux_session} 2>/dev/null || true && \
-    tmux new-session -d -s {tmux_session} '
-        source {venv_path}/bin/activate && \
-        vllm serve {model} \
-            --host 0.0.0.0 \
-            --port {port} \
-            --max-num-seqs {max_num_seqs}
-    '
-    """
+    # We use -d to start it detached immediately.
+    # We wrap the command in bash -ic to ensure your .bashrc/env is loaded correctly.
+    remote_cmd = (
+        f"tmux kill-session -t {tmux_session} 2>/dev/null || true; "
+        f"tmux new-session -d -s {tmux_session} "
+        f"\"source {venv_path}/bin/activate && vllm serve {model} --host 0.0.0.0 --port {port} --max-num-seqs {max_num_seqs}\""
+    )
 
     print(f"Starting vLLM on {hostname}...")
+    # Using 'ssh -f' tells SSH to go to the background immediately after starting the command
     result = subprocess.run(
-        ["ssh", hostname, remote_cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        ["ssh", "-f", hostname, remote_cmd],
+        capture_output=True,
+        text=True
     )
 
     if result.returncode != 0:
         raise RuntimeError(f"Failed to start vLLM on {hostname}:\n{result.stderr}")
 
-    print(f"vLLM started on {hostname} (tmux: {tmux_session})")
+    print(f"vLLM start command sent to {hostname}")
 
 def wait_for_ready(node_hostname, timeout=120):
     import time

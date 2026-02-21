@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.responses import HTMLResponse
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -419,6 +419,13 @@ async def get_metrics():
 async def monitoring_status():
     return {"monitoring_active": _monitoring_agents_started}
 
+@app.post("/api/cluster/start_vllm")
+def start_vllm():
+    node_interface_ip.start("node2")
+    node_interface_ip.start("node3")
+    node_interface_ip.start("node4")
+    node_interface_ip.start("node5")
+    return {"status": "sent"}
 
 SPAM_PROMPTS_50 = [
     "Say hello.",

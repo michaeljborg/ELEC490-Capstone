@@ -15,6 +15,16 @@
     --muted: #94a3b8;
 }
 
+.btn-master { 
+    background: var(--accent2); 
+    color: white; 
+    padding: 10px 15px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+}
+
 body {
     margin: 0;
     padding: 40px;
@@ -180,6 +190,10 @@ function appendLine(line) {
     box.scrollTop = box.scrollHeight;
 }
 
+function startVllm() {
+    fetch('/api/cluster/start_vllm', { method: 'POST' });
+}
+
 async function sendQuery() {
     const prompt = document.getElementById("userPrompt").value;
     if (!prompt) return alert("Please enter a prompt.");
@@ -328,6 +342,7 @@ document.addEventListener('DOMContentLoaded', initMonitoringPanel);
 <div class="monitoring-panel">
     <h3 style="margin-top:0">Cluster Monitoring</h3>
     <div class="monitoring-controls">
+        <button onclick="startVllm()">🚀 Start Node 2</button>
         <button onclick="startMonitoring()">Start Monitoring</button>
         <button onclick="stopMonitoring()">Stop Monitoring</button>
         <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
