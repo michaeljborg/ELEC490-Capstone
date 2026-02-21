@@ -7,6 +7,10 @@ import base64
 import json
 import node_interface_ip
 from fastapi.templating import Jinja2Templates
+import socket
+import threading
+from collections import deque
+from pathlib import Path
 
 app = FastAPI()
 templates = Jinja2Templates(directory=".")
@@ -16,6 +20,10 @@ PENDING: dict[str, asyncio.Future] = {}
 # ---- CONFIG ----
 PATH_TO_SCRIPT = "/home/cluster/ELEC490-Capstone"
 NODE_POOL = ["node2", "node3", "node4"]
+# Monitoring
+MONITOR_PORT = 5000
+METRICS_SAMPLES_CAP = 60  # last N samples per node for live charts
+METRICS_LOG_PATH = Path("metrics_log.jsonl")  # persistent log for reports
 # ----------------
 
 WAITING_FOR_NODE = 0
@@ -35,6 +43,47 @@ AVAILABLE_NODES: asyncio.Queue = asyncio.Queue()
 IN_FLIGHT = {node: 0 for node in NODE_POOL}
 
 DISPATCHER_TASK: asyncio.Task | None = None
+
+# ---- Monitoring ----
+# Last N samples per node (for charts); each entry is a metrics dict from monitor_agent
+_metrics_store: dict[str, deque] = {}
+_metrics_lock = threading.Lock()
+_monitoring_agents_started = False
+
+
+def _metrics_listener():
+    """Run in background thread: accept TCP connections on MONITOR_PORT, store + log metrics."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("0.0.0.0", MONITOR_PORT))
+        s.listen()
+        while True:
+            try:
+                conn, _ = s.accept()
+                with conn:
+                    data = conn.recv(4096)
+                    if not data:
+                        continue
+                    try:
+                        metrics = json.loads(data.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        continue
+                    node_name = metrics.get("node_name")
+                    if not node_name:
+                        continue
+                    with _metrics_lock:
+                        if node_name not in _metrics_store:
+                            _metrics_store[node_name] = deque(maxlen=METRICS_SAMPLES_CAP)
+                        _metrics_store[node_name].append(metrics)
+                    try:
+                        with open(METRICS_LOG_PATH, "a") as f:
+                            f.write(json.dumps(metrics) + "\n")
+                    except Exception:
+                        pass
+            except OSError:
+                break
+            except Exception:
+                pass
 
 
 async def broadcast_status():
@@ -72,15 +121,19 @@ async def startup_event():
 
     asyncio.create_task(dispatch_loop())
 
+    # Start metrics listener so we can receive from agents when they are started
+    t = threading.Thread(target=_metrics_listener, daemon=True)
+    t.start()
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    # No assigned_node anymore
     return templates.TemplateResponse(
         "gui.html",
         {
             "request": request,
             "node_pool": NODE_POOL,
             "node_pool_json": json.dumps(NODE_POOL),
+            "METRICS_SAMPLES_CAP": METRICS_SAMPLES_CAP,
         },
     )
 
@@ -212,6 +265,89 @@ async def wait(job_id: str):
         return {"ok": False, "error": str(e)}
     finally:
         PENDING.pop(job_id, None)
+
+
+# ---- Monitoring API ----
+def _ssh_start_monitor_agent(node: str) -> bool:
+    """Start monitor_agent on one node via SSH + tmux. Returns True on success."""
+    remote_cmd = (
+        f'tmux kill-session -t monitor 2>/dev/null || true; '
+        f'cd "{PATH_TO_SCRIPT}" && tmux new-session -d -s monitor "python3 monitor/monitor_agent.py"'
+    )
+    proc = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=5", node, remote_cmd],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    return proc.returncode == 0
+
+
+def _ssh_stop_monitor_agent(node: str) -> bool:
+    """Stop monitor_agent on one node. Returns True on success."""
+    proc = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=5", node, "tmux kill-session -t monitor 2>/dev/null || true"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return proc.returncode == 0
+
+
+@app.post("/api/monitoring/start")
+async def monitoring_start():
+    """Start monitor_agent on all nodes via SSH + tmux."""
+    global _monitoring_agents_started
+    loop = asyncio.get_running_loop()
+    results = {}
+    for node in NODE_POOL:
+        try:
+            ok = await loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
+            results[node] = ok
+        except Exception as e:
+            results[node] = False
+    _monitoring_agents_started = any(results.values())
+    return {"ok": True, "agents": results, "monitoring_active": _monitoring_agents_started}
+
+
+@app.post("/api/monitoring/stop")
+async def monitoring_stop():
+    """Stop monitor_agent on all nodes."""
+    global _monitoring_agents_started
+    loop = asyncio.get_running_loop()
+    results = {}
+    for node in NODE_POOL:
+        try:
+            ok = await loop.run_in_executor(EXECUTOR, _ssh_stop_monitor_agent, node)
+            results[node] = ok
+        except Exception:
+            results[node] = False
+    _monitoring_agents_started = False
+    return {"ok": True, "agents": results, "monitoring_active": False}
+
+
+@app.get("/api/metrics")
+async def get_metrics():
+    """Latest metrics and last N samples per node for charts; log is written to file."""
+    with _metrics_lock:
+        by_node = {}
+        for node, deq in _metrics_store.items():
+            samples = list(deq)
+            by_node[node] = {
+                "latest": samples[-1] if samples else None,
+                "samples": samples,
+            }
+    return {
+        "by_node": by_node,
+        "monitoring_active": _monitoring_agents_started,
+        "log_path": str(METRICS_LOG_PATH),
+    }
+
+
+@app.get("/api/monitoring/status")
+async def monitoring_status():
+    return {"monitoring_active": _monitoring_agents_started}
+
 
 SPAM_PROMPTS_50 = [
     "Say hello.",

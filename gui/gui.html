@@ -100,6 +100,54 @@ button {
     white-space: pre-wrap;
     color: #38bdf8;
 }
+
+.tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+}
+.tabs button {
+    padding: 10px 20px;
+    border-radius: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+}
+.tabs button.active {
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    color: white;
+    border-color: transparent;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.monitoring-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.monitoring-status {
+    color: var(--muted);
+    font-size: 14px;
+}
+.metrics-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.metric-card {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+}
+.metric-card h4 { margin: 0 0 10px 0; color: var(--accent); }
+.metric-card .row { margin-bottom: 6px; font-size: 13px; }
+.metric-card .label { color: var(--muted); }
+.metric-card .value { color: var(--text); font-weight: 600; }
+.log-note { font-size: 12px; color: var(--muted); margin-top: 16px; }
 </style>
 
 <script>
@@ -107,6 +155,8 @@ const NODE_POOL = {{ node_pool_json | safe }};
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+
+let metricsPollTimer = null;
 
 ws.onmessage = (event) => {
     const status = JSON.parse(event.data);
@@ -196,7 +246,68 @@ async function spam50() {
   }
 
   appendLine("spam50 done.");
-}   
+}
+
+function showTab(name) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    const panel = document.getElementById('tab-' + name);
+    const btn = document.querySelector('.tabs button[data-tab="' + name + '"]');
+    if (panel) panel.classList.add('active');
+    if (btn) btn.classList.add('active');
+    if (name === 'monitoring') {
+        refreshMetrics();
+        if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
+    } else {
+        if (metricsPollTimer) { clearInterval(metricsPollTimer); metricsPollTimer = null; }
+    }
+}
+
+async function startMonitoring() {
+    const res = await fetch('/api/monitoring/start', { method: 'POST' });
+    const data = await res.json();
+    document.getElementById('monitoring-status-text').innerText = data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
+    refreshMetrics();
+}
+
+async function stopMonitoring() {
+    const res = await fetch('/api/monitoring/stop', { method: 'POST' });
+    await res.json();
+    document.getElementById('monitoring-status-text').innerText = 'Stopped';
+    refreshMetrics();
+}
+
+async function refreshMetrics() {
+    const res = await fetch('/api/metrics');
+    const data = await res.json();
+    const statusEl = document.getElementById('monitoring-status-text');
+    if (statusEl && !statusEl.innerText) statusEl.innerText = data.monitoring_active ? 'Monitoring active' : 'Stopped';
+    const container = document.getElementById('metrics-container');
+    if (!container) return;
+    const nodePool = {{ node_pool_json | safe }};
+    let html = '';
+    for (const node of nodePool) {
+        const info = data.by_node[node];
+        const latest = info && info.latest ? info.latest : null;
+        html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+        if (!latest) {
+            html += '<div class="row"><span class="label">No data</span></div>';
+        } else {
+            html += '<div class="row"><span class="label">CPU:</span> <span class="value">' + (latest.cpu_percent != null ? latest.cpu_percent.toFixed(1) + '%' : '-') + '</span></div>';
+            html += '<div class="row"><span class="label">RAM:</span> <span class="value">' + (latest.ram_percent != null ? latest.ram_percent.toFixed(1) + '%' : '-') + '</span></div>';
+            if (latest.gpu_utilization_percent != null) {
+                html += '<div class="row"><span class="label">GPU:</span> <span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
+                html += '<div class="row"><span class="label">GPU mem:</span> <span class="value">' + (latest.gpu_memory_used_mb != null ? Math.round(latest.gpu_memory_used_mb) + ' MB' : '-') + '</span></div>';
+            } else if (latest.gpu_error) {
+                html += '<div class="row"><span class="label">GPU:</span> <span class="value" style="color:var(--muted)">' + latest.gpu_error + '</span></div>';
+            }
+        }
+        html += '</div>';
+    }
+    container.innerHTML = html;
+    const logEl = document.getElementById('metrics-log-path');
+    if (logEl) logEl.innerText = data.log_path || 'metrics_log.jsonl';
+}
 
 
 </script>
@@ -215,8 +326,13 @@ async function spam50() {
 </div>
 
 <div class="main-panel">
-    <h2>LLM Cluster Interface</h2>
+    <h2>Cluster Control Panel</h2>
+    <div class="tabs">
+        <button class="active" data-tab="inference" onclick="showTab('inference')">Inference</button>
+        <button data-tab="monitoring" onclick="showTab('monitoring')">Monitoring</button>
+    </div>
 
+    <div id="tab-inference" class="tab-panel active">
     <div class="status-card">
         <div><strong>Queue Depth:</strong>
             <span id="queue-depth" class="highlight">0</span>
@@ -233,6 +349,17 @@ async function spam50() {
     </div>
 
     <div id="output"></div>
+    </div>
+
+    <div id="tab-monitoring" class="tab-panel">
+        <div class="monitoring-controls">
+            <button onclick="startMonitoring()">Start Monitoring</button>
+            <button onclick="stopMonitoring()">Stop Monitoring</button>
+            <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
+        </div>
+        <div id="metrics-container" class="metrics-grid"></div>
+        <p class="log-note">Metrics are appended to <span id="metrics-log-path">metrics_log.jsonl</span> for future reports. Last {{ METRICS_SAMPLES_CAP }} samples per node are kept in memory for live charts.</p>
+    </div>
 </div>
 
 </body>
