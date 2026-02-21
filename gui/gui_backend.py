@@ -220,16 +220,19 @@ async def dispatch_loop():
 
 @app.post("/relay")
 async def relay(request: Request):
-    ahead = JOB_QUEUE.qsize() + WAITING_FOR_NODE
+    data = await request.json()
+    prompt = (data.get("prompt") or "").strip()
+    job_id = data.get("job_id") or f"relay-{int(asyncio.get_running_loop().time())}"
+    
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
 
     await JOB_QUEUE.put((job_id, prompt, fut))
     await broadcast_status()
 
-    node, val = await fut
     try:
+        node, val = await asyncio.wait_for(fut, timeout=180)
         return {"ok": True, "node": node, "line": val}
-    except asyncio.TimeoutError:
-        return {"ok": False, "error": "Timed out waiting in queue/processing"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
