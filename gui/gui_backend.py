@@ -11,6 +11,8 @@ import socket
 import threading
 from collections import deque
 from pathlib import Path
+import node_interface_ip
+
 
 app = FastAPI()
 templates = Jinja2Templates(directory=".")
@@ -422,6 +424,78 @@ async def get_metrics():
 async def monitoring_status():
     return {"monitoring_active": _monitoring_agents_started}
 
+def _start_vllm_node(node: str):
+    try:
+        node_interface_ip.start(node)
+        node_interface_ip.wait_for_ready(node, timeout=120)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def _stop_vllm_node(node: str):
+    try:
+        remote_cmd = "tmux kill-session -t vllm 2>/dev/null || true"
+        proc = subprocess.run(
+            ["ssh", node, remote_cmd],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return proc.returncode == 0, None
+    except Exception as e:
+        return False, str(e)
+
+@app.post("/api/vllm/start")
+async def start_vllm_cluster():
+    loop = asyncio.get_running_loop()
+    results = {}
+    errors = {}
+
+    for node in NODE_POOL:
+        try:
+            ok, err = await loop.run_in_executor(
+                EXECUTOR,
+                _start_vllm_node,
+                node
+            )
+            results[node] = ok
+            if err:
+                errors[node] = err
+        except Exception as e:
+            results[node] = False
+            errors[node] = str(e)
+
+    return {
+        "ok": True,
+        "nodes": results,
+        "errors": errors
+    }
+
+@app.post("/api/vllm/stop")
+async def stop_vllm_cluster():
+    loop = asyncio.get_running_loop()
+    results = {}
+    errors = {}
+
+    for node in NODE_POOL:
+        try:
+            ok, err = await loop.run_in_executor(
+                EXECUTOR,
+                _stop_vllm_node,
+                node
+            )
+            results[node] = ok
+            if err:
+                errors[node] = err
+        except Exception as e:
+            results[node] = False
+            errors[node] = str(e)
+
+    return {
+        "ok": True,
+        "nodes": results,
+        "errors": errors
+    }
 
 SPAM_PROMPTS_50 = [
     "Say hello.",
