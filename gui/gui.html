@@ -100,6 +100,42 @@ button {
     white-space: pre-wrap;
     color: #38bdf8;
 }
+
+.monitoring-panel {
+    width: 380px;
+    background: var(--panel);
+    backdrop-filter: blur(14px);
+    border-radius: 18px;
+    padding: 35px;
+    border: 1px solid var(--border);
+}
+
+.monitoring-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.monitoring-status {
+    color: var(--muted);
+    font-size: 14px;
+}
+.metrics-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.metric-card {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+}
+.metric-card h4 { margin: 0 0 10px 0; color: var(--accent); }
+.metric-card .row { margin-bottom: 6px; font-size: 13px; }
+.metric-card .label { color: var(--muted); }
+.metric-card .value { color: var(--text); font-weight: 600; }
+.log-note { font-size: 12px; color: var(--muted); margin-top: 16px; }
 </style>
 
 <script>
@@ -107,6 +143,8 @@ const NODE_POOL = {{ node_pool_json | safe }};
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+
+let metricsPollTimer = null;
 
 ws.onmessage = (event) => {
     const status = JSON.parse(event.data);
@@ -196,9 +234,62 @@ async function spam50() {
   }
 
   appendLine("spam50 done.");
-}   
+}
 
+function initMonitoringPanel() {
+    refreshMetrics();
+    if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
+}
 
+async function startMonitoring() {
+    const res = await fetch('/api/monitoring/start', { method: 'POST' });
+    const data = await res.json();
+    document.getElementById('monitoring-status-text').innerText = data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
+    refreshMetrics();
+}
+
+async function stopMonitoring() {
+    const res = await fetch('/api/monitoring/stop', { method: 'POST' });
+    await res.json();
+    document.getElementById('monitoring-status-text').innerText = 'Stopped';
+    const resultEl = document.getElementById('monitoring-start-result');
+    if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
+    refreshMetrics();
+}
+
+async function refreshMetrics() {
+    const res = await fetch('/api/metrics');
+    const data = await res.json();
+    const statusEl = document.getElementById('monitoring-status-text');
+    if (statusEl && !statusEl.innerText) statusEl.innerText = data.monitoring_active ? 'Monitoring active' : 'Stopped';
+    const container = document.getElementById('metrics-container');
+    if (!container) return;
+    const nodePool = {{ node_pool_json | safe }};
+    let html = '';
+    for (const node of nodePool) {
+        const info = data.by_node[node];
+        const latest = info && info.latest ? info.latest : null;
+        html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+        if (!latest) {
+            html += '<div class="row"><span class="label">No data</span></div>';
+        } else {
+            html += '<div class="row"><span class="label">CPU:</span> <span class="value">' + (latest.cpu_percent != null ? latest.cpu_percent.toFixed(1) + '%' : '-') + '</span></div>';
+            html += '<div class="row"><span class="label">RAM:</span> <span class="value">' + (latest.ram_percent != null ? latest.ram_percent.toFixed(1) + '%' : '-') + '</span></div>';
+            if (latest.gpu_utilization_percent != null) {
+                html += '<div class="row"><span class="label">GPU:</span> <span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
+                html += '<div class="row"><span class="label">GPU mem:</span> <span class="value">' + (latest.gpu_memory_used_mb != null ? Math.round(latest.gpu_memory_used_mb) + ' MB' : '-') + '</span></div>';
+            } else if (latest.gpu_error) {
+                html += '<div class="row"><span class="label">GPU:</span> <span class="value" style="color:var(--muted)">' + latest.gpu_error + '</span></div>';
+            }
+        }
+        html += '</div>';
+    }
+    container.innerHTML = html;
+    const logEl = document.getElementById('metrics-log-path');
+    if (logEl) logEl.innerText = 'monitor/log/<node>.jsonl (one file per node)';
+}
+
+document.addEventListener('DOMContentLoaded', initMonitoringPanel);
 </script>
 </head>
 
@@ -215,8 +306,7 @@ async function spam50() {
 </div>
 
 <div class="main-panel">
-    <h2>LLM Cluster Interface</h2>
-
+    <h2>Cluster Control Panel</h2>
     <div class="status-card">
         <div><strong>Queue Depth:</strong>
             <span id="queue-depth" class="highlight">0</span>
@@ -233,6 +323,19 @@ async function spam50() {
     </div>
 
     <div id="output"></div>
+</div>
+
+<div class="monitoring-panel">
+    <h3 style="margin-top:0">Cluster Monitoring</h3>
+    <div class="monitoring-controls">
+        <button onclick="startMonitoring()">Start Monitoring</button>
+        <button onclick="stopMonitoring()">Stop Monitoring</button>
+        <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
+    </div>
+    <div id="monitoring-start-result" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:13px;"></div>
+    <div id="monitoring-diagnose-output" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:12px;"></div>
+    <div id="metrics-container" class="metrics-grid"></div>
+    <p class="log-note">Metrics are appended to <span id="metrics-log-path">monitor/log/</span> (one <code>&lt;node&gt;.jsonl</code> per node). Last {{ METRICS_SAMPLES_CAP }} samples per node are kept in memory for live charts.</p>
 </div>
 
 </body>
