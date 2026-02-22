@@ -14,7 +14,6 @@
     --text: #e2e8f0;
     --muted: #94a3b8;
 }
-
 body {
     margin: 0;
     padding: 40px;
@@ -25,7 +24,6 @@ body {
     gap: 30px;
     justify-content: center;
 }
-
 .sidebar {
     width: 240px;
     background: var(--panel);
@@ -34,7 +32,6 @@ body {
     border-radius: 16px;
     padding: 25px;
 }
-
 .node-item {
     padding: 10px 0;
     border-bottom: 1px solid var(--border);
@@ -42,7 +39,6 @@ body {
     display: flex;
     justify-content: space-between;
 }
-
 .main-panel {
     width: 720px;
     background: var(--panel);
@@ -51,25 +47,21 @@ body {
     padding: 35px;
     border: 1px solid var(--border);
 }
-
 .status-card {
     background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(124,58,237,0.08));
     padding: 20px;
     border-radius: 14px;
     margin-bottom: 25px;
 }
-
 .highlight {
     color: var(--accent);
     font-weight: 600;
 }
-
 .row {
     display: flex;
     gap: 15px;
     margin-bottom: 20px;
 }
-
 input[type="text"] {
     flex-grow: 1;
     padding: 14px;
@@ -78,7 +70,6 @@ input[type="text"] {
     background: #0f172a;
     color: var(--text);
 }
-
 button {
     padding: 14px 28px;
     border-radius: 12px;
@@ -88,7 +79,6 @@ button {
     font-weight: bold;
     cursor: pointer;
 }
-
 #output {
     height: 380px;
     overflow-y: auto;
@@ -100,7 +90,6 @@ button {
     white-space: pre-wrap;
     color: #38bdf8;
 }
-
 .monitoring-panel {
     width: 380px;
     background: var(--panel);
@@ -109,7 +98,6 @@ button {
     padding: 35px;
     border: 1px solid var(--border);
 }
-
 .monitoring-controls {
     display: flex;
     gap: 12px;
@@ -140,7 +128,6 @@ button {
 
 <script>
 const NODE_POOL = {{ node_pool_json | safe }};
-
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
@@ -149,23 +136,14 @@ let metricsPollTimer = null;
 ws.onmessage = (event) => {
     const status = JSON.parse(event.data);
 
-    // Update per-node in-flight counts
     NODE_POOL.forEach(node => {
-    const element = document.getElementById("status-" + node);
-    const inUse = status.in_flight && status.in_flight[node] > 0;
+        const element = document.getElementById("status-" + node);
+        const inUse = status.in_flight && status.in_flight[node] > 0;
+        if (!element) return;
+        element.innerText = inUse ? "In Use" : "Free";
+        element.style.color = inUse ? "red" : "lime";
+    });
 
-    if (!element) return;
-
-    if (inUse) {
-        element.innerText = "In Use";
-        element.style.color = "rgb(255, 0, 0)";  // full red
-    } else {
-        element.innerText = "Free";
-        element.style.color = "rgb(0, 255, 0)";  // full green
-    }
-});
-
-    // Queue depth + user count
     const q = document.getElementById("queue-depth");
     if (q) q.innerText = status.queue_depth ?? 0;
 
@@ -183,59 +161,85 @@ function appendLine(line) {
 async function sendQuery() {
     const prompt = document.getElementById("userPrompt").value;
     if (!prompt) return alert("Please enter a prompt.");
+    const job_id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
-    const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    const enq = await fetch("/enqueue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, job_id })
+    });
 
-    try {
-        // 1) Enqueue and get queue position
-        const enq = await fetch("/enqueue", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt, job_id })
-        });
-        const enqData = await enq.json();
+    const enqData = await enq.json();
+    if (!enqData.ok) return appendLine("ERROR: " + enqData.error);
 
-        if (!enqData.ok) {
-            appendLine("ERROR: " + enqData.error);
-            return;
-        }
+    appendLine(`Queued prompt. ${enqData.ahead} ahead.`);
 
-        appendLine(`Queued prompt (FIFO). ${enqData.ahead} ahead of you. Waiting for dispatch...`);
+    const res = await fetch("/wait/" + encodeURIComponent(job_id));
+    const data = await res.json();
 
-        // 2) Wait for completion
-        const res = await fetch("/wait/" + encodeURIComponent(job_id));
-        const data = await res.json();
-
-        if (data.ok) {
-            appendLine("RESPONSE [" + data.node + "]: " + data.line);
-        } else {
-            appendLine("ERROR: " + data.error);
-        }
-
-    } catch (e) {
-        appendLine("FETCH ERROR: " + e.message);
-    }
+    if (data.ok)
+        appendLine("RESPONSE [" + data.node + "]: " + data.line);
+    else
+        appendLine("ERROR: " + data.error);
 }
 
 async function spam50() {
-  appendLine("Requesting server to enqueue 50 prompts...");
+    appendLine("Enqueuing 50 prompts...");
+    const res = await fetch("/spam50", { method: "POST" });
+    const info = await res.json();
+    if (!info.ok) return appendLine("ERROR: " + info.error);
 
-  const res = await fetch("/spam50", { method: "POST" });
-  const info = await res.json();
-  if (!info.ok) { appendLine("ERROR: " + info.error); return; }
-
-  appendLine(`Enqueued 50. ~${info.ahead_before} ahead in system. Waiting for results...`);
-
-  for (const job_id of info.job_ids) {
-    const r = await fetch("/wait/" + encodeURIComponent(job_id));
-    const data = await r.json();
-    if (data.ok) appendLine(`RESPONSE [${data.node}]: ${data.line}`);
-    else appendLine(`ERROR (${job_id}): ${data.error}`);
-  }
-
-  appendLine("spam50 done.");
+    for (const job_id of info.job_ids) {
+        const r = await fetch("/wait/" + encodeURIComponent(job_id));
+        const data = await r.json();
+        if (data.ok)
+            appendLine(`RESPONSE [${data.node}]: ${data.line}`);
+        else
+            appendLine(`ERROR: ${data.error}`);
+    }
 }
 
+/* ===== START VLLM ===== */
+async function startVLLMCluster() {
+    appendLine("Starting vLLM on worker nodes...");
+    try {
+        const res = await fetch('/api/vllm/start', { method: 'POST' });
+        const data = await res.json();
+
+        for (const node in data.nodes) {
+            if (data.nodes[node]) {
+                appendLine("✔ " + node + " started successfully.");
+            } else {
+                appendLine("✖ " + node + " failed: " + (data.errors[node] || "Unknown error"));
+            }
+        }
+        appendLine("Cluster startup complete.");
+    } catch (e) {
+        appendLine("ERROR: " + e.message);
+    }
+}
+
+/* ===== STOP VLLM ===== */
+async function stopVLLMCluster() {
+    appendLine("Stopping vLLM on worker nodes...");
+    try {
+        const res = await fetch('/api/vllm/stop', { method: 'POST' });
+        const data = await res.json();
+
+        for (const node in data.nodes) {
+            if (data.nodes[node]) {
+                appendLine("✔ " + node + " stopped successfully.");
+            } else {
+                appendLine("✖ " + node + " failed to stop: " + (data.errors[node] || "Unknown error"));
+            }
+        }
+        appendLine("Cluster shutdown complete.");
+    } catch (e) {
+        appendLine("ERROR: " + e.message);
+    }
+}
+
+/* ===== MONITORING ===== */
 function initMonitoringPanel() {
     refreshMetrics();
     if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
@@ -244,7 +248,8 @@ function initMonitoringPanel() {
 async function startMonitoring() {
     const res = await fetch('/api/monitoring/start', { method: 'POST' });
     const data = await res.json();
-    document.getElementById('monitoring-status-text').innerText = data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
+    document.getElementById('monitoring-status-text').innerText =
+        data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
     refreshMetrics();
 }
 
@@ -252,41 +257,32 @@ async function stopMonitoring() {
     const res = await fetch('/api/monitoring/stop', { method: 'POST' });
     await res.json();
     document.getElementById('monitoring-status-text').innerText = 'Stopped';
-    const resultEl = document.getElementById('monitoring-start-result');
-    if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
     refreshMetrics();
 }
 
 async function refreshMetrics() {
     const res = await fetch('/api/metrics');
     const data = await res.json();
-    const statusEl = document.getElementById('monitoring-status-text');
-    if (statusEl && !statusEl.innerText) statusEl.innerText = data.monitoring_active ? 'Monitoring active' : 'Stopped';
     const container = document.getElementById('metrics-container');
     if (!container) return;
-    const nodePool = {{ node_pool_json | safe }};
+
     let html = '';
-    for (const node of nodePool) {
+    for (const node of NODE_POOL) {
         const info = data.by_node[node];
         const latest = info && info.latest ? info.latest : null;
+
         html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
         if (!latest) {
             html += '<div class="row"><span class="label">No data</span></div>';
         } else {
-            html += '<div class="row"><span class="label">CPU:</span> <span class="value">' + (latest.cpu_percent != null ? latest.cpu_percent.toFixed(1) + '%' : '-') + '</span></div>';
-            html += '<div class="row"><span class="label">RAM:</span> <span class="value">' + (latest.ram_percent != null ? latest.ram_percent.toFixed(1) + '%' : '-') + '</span></div>';
-            if (latest.gpu_utilization_percent != null) {
-                html += '<div class="row"><span class="label">GPU:</span> <span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
-                html += '<div class="row"><span class="label">GPU mem:</span> <span class="value">' + (latest.gpu_memory_used_mb != null ? Math.round(latest.gpu_memory_used_mb) + ' MB' : '-') + '</span></div>';
-            } else if (latest.gpu_error) {
-                html += '<div class="row"><span class="label">GPU:</span> <span class="value" style="color:var(--muted)">' + latest.gpu_error + '</span></div>';
-            }
+            html += '<div class="row"><span class="label">CPU:</span> <span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
+            html += '<div class="row"><span class="label">RAM:</span> <span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
+            html += '<div class="row"><span class="label">GPU:</span> <span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
         }
         html += '</div>';
     }
+
     container.innerHTML = html;
-    const logEl = document.getElementById('metrics-log-path');
-    if (logEl) logEl.innerText = 'monitor/log/<node>.jsonl (one file per node)';
 }
 
 document.addEventListener('DOMContentLoaded', initMonitoringPanel);
@@ -296,10 +292,10 @@ document.addEventListener('DOMContentLoaded', initMonitoringPanel);
 <body>
 
 <div class="sidebar">
-    <h3 style="margin-top:0">Cluster Status</h3>
+    <h3>Cluster Status</h3>
     {% for node in node_pool %}
     <div class="node-item">
-        <strong>{{ node.upper() }}:</strong> 
+        <strong>{{ node.upper() }}:</strong>
         <span id="status-{{ node }}">Free</span>
     </div>
     {% endfor %}
@@ -307,6 +303,7 @@ document.addEventListener('DOMContentLoaded', initMonitoringPanel);
 
 <div class="main-panel">
     <h2>Cluster Control Panel</h2>
+
     <div class="status-card">
         <div><strong>Queue Depth:</strong>
             <span id="queue-depth" class="highlight">0</span>
@@ -320,22 +317,21 @@ document.addEventListener('DOMContentLoaded', initMonitoringPanel);
         <input type="text" id="userPrompt" placeholder="Enter prompt..." onkeydown="if(event.key==='Enter') sendQuery()">
         <button onclick="sendQuery()">Run Query</button>
         <button onclick="spam50()">Spam 50</button>
+        <button onclick="startVLLMCluster()">Start vLLM Cluster</button>
+        <button onclick="stopVLLMCluster()">Stop vLLM Cluster</button>
     </div>
 
     <div id="output"></div>
 </div>
 
 <div class="monitoring-panel">
-    <h3 style="margin-top:0">Cluster Monitoring</h3>
+    <h3>Cluster Monitoring</h3>
     <div class="monitoring-controls">
         <button onclick="startMonitoring()">Start Monitoring</button>
         <button onclick="stopMonitoring()">Stop Monitoring</button>
         <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
     </div>
-    <div id="monitoring-start-result" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:13px;"></div>
-    <div id="monitoring-diagnose-output" class="monitoring-status" style="display:none; margin-bottom:12px; font-size:12px;"></div>
     <div id="metrics-container" class="metrics-grid"></div>
-    <p class="log-note">Metrics are appended to <span id="metrics-log-path">monitor/log/</span> (one <code>&lt;node&gt;.jsonl</code> per node). Last {{ METRICS_SAMPLES_CAP }} samples per node are kept in memory for live charts.</p>
 </div>
 
 </body>
