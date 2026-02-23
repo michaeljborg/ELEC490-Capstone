@@ -13,8 +13,9 @@ OS: Ubuntu 24.04.2 LTS
 3. Connect your device to the cluster
 4. Open terminal and use `ssh cluster@group15cluster-2`
 
-luster Setup Steps
-(First two steps to undo incorrect setup)
+---
+### Cluster Setup Steps
+(First two steps to undo incorrect setup)  
 **Check**
 `nmcli con show`
 **Delete**
