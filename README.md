@@ -2,11 +2,9 @@
 
 ---
 ### Cluster Info
-6 Alienware PCs
-
-Nvidia GeForce RTX 3060 8GB
-
-OS: Ubuntu 24.04.2 LTS
+6 Alienware PCs  
+Nvidia GeForce RTX 3060 8GB  
+OS: Ubuntu 24.04.2 LTS  
 
 ---
 #### How to Access Cluster (Head Node)
