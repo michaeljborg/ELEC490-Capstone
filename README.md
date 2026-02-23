@@ -64,75 +64,74 @@ network:
 ```
 
 **Now from headnode**
-`ssh nodeX`
-Can access over ethernet NOT TailScale
+`ssh nodeX`  
+Can access over ethernet NOT TailScale  
 
 ---
 ### NVIDIA Driver + CUDA install
 
 **Purge existing state**
-sudo apt purge -y 'nvidia*'
-sudo apt purge -y 'libnvidia*'
-sudo apt purge -y 'cuda*'
-sudo apt autoremove -y
-sudo apt autoclean
-sudo reboot
-`
+sudo apt purge -y 'nvidia*'  
+sudo apt purge -y 'libnvidia*'  
+sudo apt purge -y 'cuda*'  
+sudo apt autoremove -y  
+sudo apt autoclean  
+sudo reboot  
 
-**Add NVIDIA CUDA Repository**
-sudo apt update
-sudo apt install -y wget gnupg`
+**Add NVIDIA CUDA Repository**  
+sudo apt update  
+sudo apt install -y wget gnupg`  
 
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-sudo dpkg -i cuda-keyring_1.1-1_all.deb
-sudo apt update
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb  
+sudo dpkg -i cuda-keyring_1.1-1_all.deb  
+sudo apt update  
 
-**Install exact driver**
-apt-cache search nvidia-driver-580
-sudo apt install -y nvidia-driver-580
-sudo reboot
+**Install exact driver**  
+apt-cache search nvidia-driver-580  
+sudo apt install -y nvidia-driver-580  
+sudo reboot  
 
-**Verify**
-nvidia-smi
+**Verify**  
+nvidia-smi  
 
 ---
 ### IP Forwarding
 #### Headnode
-Enable IP Forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-cluster-forwarding.conf
+Enable IP Forwarding  
+sudo sysctl -w net.ipv4.ip_forward=1  
+echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-cluster-forwarding.conf  
 
-Enable NAT
-ip route | grep default
-sudo iptables -t nat -A POSTROUTING -s 192.168.50.0/24 -o enx9c69d3273282 -j MASQUERADE
+Enable NAT  
+ip route | grep default  
+sudo iptables -t nat -A POSTROUTING -s 192.168.50.0/24 -o enx9c69d3273282 -j MASQUERADE  
 
-Persist Rules
-sudo apt install -y iptables-persistent
-sudo netfilter-persistent save
+Persist Rules  
+sudo apt install -y iptables-persistent  
+sudo netfilter-persistent save  
 
 #### Compute Node
-**Add default route**
-sudo ip route add default via 192.168.50.1
-ip route
+**Add default route**  
+sudo ip route add default via 192.168.50.1   
+ip route  
 
-**Add DNS servers**
-sudo nano /etc/systemd/resolved.conf
+**Add DNS servers**  
+sudo nano /etc/systemd/resolved.conf  
 
-Paste in:
-[Resolve]
-DNS=8.8.8.8 1.1.1.1
-FallbackDNS=9.9.9.9
+Paste in:  
+[Resolve]  
+DNS=8.8.8.8 1.1.1.1  
+FallbackDNS=9.9.9.9  
 
-**Restart Resolver**
-sudo systemctl restart systemd-resolved
+**Restart Resolver**  
+sudo systemctl restart systemd-resolved  
 
-**Test**
-ping -c 3 8.8.8.8
-ping -c 3 google.com
+**Test**  
+ping -c 3 8.8.8.8  
+ping -c 3 google.com  
 
-**Make Routing Persistant**
-Add to Netplan
-sudo nano /etc/netplan/01-cluster-eno1.yaml
+**Make Routing Persistant**  
+Add to Netplan  
+sudo nano /etc/netplan/01-cluster-eno1.yaml  
 
 ```yaml
 network:
