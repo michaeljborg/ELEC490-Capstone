@@ -10,22 +10,17 @@ NODES = {
     "node6": "192.168.50.6",
 }
 
-def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
+def start(hostname, model="Qwen/Qwen2.5-7B-Instruct-AWQ"):
     tmux_session = "vllm"
     venv_path = "~/vllm-venv"
     port = 8000
     max_num_seqs = 32
 
-    remote_cmd = f"""
-    tmux kill-session -t {tmux_session} 2>/dev/null || true && \
-    tmux new-session -d -s {tmux_session} '
-        source {venv_path}/bin/activate && \
-        vllm serve {model} \
-            --host 0.0.0.0 \
-            --port {port} \
-            --max-num-seqs {max_num_seqs}
-    '
-    """
+    remote_cmd = (
+            f"tmux kill-session -t {tmux_session} 2>/dev/null || true; "
+            f"tmux new-session -d -s {tmux_session} "
+            f"\"source {venv_path}/bin/activate && vllm serve {model} --host 0.0.0.0 --port {port} --max-num-seqs {max_num_seqs} --max-model-len 8192\""
+        )
 
     print(f"Starting vLLM on {hostname}...")
     result = subprocess.run(
@@ -64,13 +59,13 @@ def wait_for_ready(node_hostname, timeout=120):
     raise TimeoutError(f"vLLM on {node_hostname} failed to start within {timeout}s")
 
 
-def query(ip, model, prompt, timeout=60):
+def query(ip, model, messages, timeout=60):
     port = 8000
     url = f"http://{ip}:{port}/v1/chat/completions"
 
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": 1024,
         "temperature": 0.7,
     }
