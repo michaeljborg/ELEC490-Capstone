@@ -7,7 +7,7 @@ Nvidia GeForce RTX 3060 8GB
 OS: Ubuntu 24.04.2 LTS  
 
 ---
-#### How to Access Cluster (Head Node)
+### How to Access Cluster (Head Node)
 1. Install TailScale: https://tailscale.com/
 2. Login through cluster Google account
 3. Connect your device to the cluster
@@ -62,7 +62,7 @@ network:
 Can access over ethernet NOT TailScale
 
 ---
-#### NVIDIA Driver + CUDA install
+### NVIDIA Driver + CUDA install
 
 **Purge existing state**
 sudo apt purge -y 'nvidia*'
