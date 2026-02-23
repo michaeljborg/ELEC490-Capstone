@@ -20,7 +20,7 @@ OS: Ubuntu 24.04.2 LTS
 `nmcli con show`  
 **Delete**  
 `sudo nmcli con delete "Wired connection 1`  
-**Create**
+**Create**  
 `sudo nano /etc/netplan/01-cluster-eno1.yaml`
 
 **Paste in:**
