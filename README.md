@@ -29,7 +29,7 @@ OS: Ubuntu 24.04.2 LTS
 `sudo nano /etc/netplan/01-cluster-eno1.yaml`
 
 **Paste in:**
-```
+```yaml
 network:
   version: 2
   ethernets:
@@ -54,7 +54,7 @@ network:
 `sudo nano /etc/hosts
 
 **Paste in:**
-```
+```yaml
 192.168.50.1 headnode
 192.168.50.2 node2
 192.168.50.3 node3
