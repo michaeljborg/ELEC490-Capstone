@@ -42,28 +42,25 @@ def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
 
 def wait_for_ready(node_hostname, timeout=120):
     import time
-    from node_interface_ip import NODES
-    
+
     ip = NODES[node_hostname]
     port = 8000
     url = f"http://{ip}:{port}/health"
-    
+
     start_time = time.time()
     print(f"Waiting for vLLM on {node_hostname} to finish startup...")
-    
+
     while time.time() - start_time < timeout:
         try:
-            # A simple GET request to the health endpoint
             r = requests.get(url, timeout=2)
             if r.status_code == 200:
                 print(f"vLLM on {node_hostname} is READY.")
                 return True
         except requests.exceptions.ConnectionError:
-            # Server hasn't opened the port yet
             pass
-        
-        time.sleep(5) # Check every 5 seconds
-        
+
+        time.sleep(5)
+
     raise TimeoutError(f"vLLM on {node_hostname} failed to start within {timeout}s")
 
 
