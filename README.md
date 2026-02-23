@@ -134,6 +134,7 @@ ping -c 3 google.com
 Add to Netplan
 sudo nano /etc/netplan/01-cluster-eno1.yaml
 
+```yaml
 network:
   version: 2
   ethernets:
@@ -148,19 +149,19 @@ network:
         addresses:
           - 8.8.8.8
           - 1.1.1.1
-
+```
 
 sudo netplan apply
 
-**Disabling Wifi Route**
-sudo nmcli device set wlp5s0 managed no
-sudo ip link set wlp5s0 down
+**Disabling Wifi Route**  
+sudo nmcli device set wlp5s0 managed no  
+sudo ip link set wlp5s0 down  
 
-Disabling Wifi Route Reboot Reset
-sudo nano /etc/NetworkManager/conf.d/99-disable-wifi.conf
+Disabling Wifi Route Reboot Reset  
+sudo nano /etc/NetworkManager/conf.d/99-disable-wifi.conf  
 
-paste:
-[keyfile]
-unmanaged-devices=interface-name:wlp5s0
+paste:  
+[keyfile]  
+unmanaged-devices=interface-name:wlp5s0  
 
 sudo systemctl restart NetworkManager
