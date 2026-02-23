@@ -14,6 +14,11 @@ OS: Ubuntu 24.04.2 LTS
 4. Open terminal and use `ssh cluster@group15cluster-2`
 
 ---
+### How to Run App
+**In the directory:** /ELEC490-Capstone/app
+**Run:** `uvicorn gui_backend:app --host 0.0.0.0 --port 8000`
+
+---
 ### Cluster Setup Steps
 (First two steps to undo incorrect setup)  
 **Check**  
