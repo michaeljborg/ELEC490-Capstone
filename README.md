@@ -15,7 +15,7 @@ OS: Ubuntu 24.04.2 LTS
 
 ---
 ### How to Run App
-**In the directory:** /ELEC490-Capstone/app
+**In the directory:** /ELEC490-Capstone/app  
 **Run:** `uvicorn gui_backend:app --host 0.0.0.0 --port 8000`
 
 ---
