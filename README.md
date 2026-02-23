@@ -90,6 +90,20 @@ sudo reboot
 nvidia-smi
 
 ---
+### IP Forwarding
+#### Headnode
+Enable IP Forwarding
+sudo sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-cluster-forwarding.conf
+
+Enable NAT
+ip route | grep default
+sudo iptables -t nat -A POSTROUTING -s 192.168.50.0/24 -o enx9c69d3273282 -j MASQUERADE
+
+Persist Rules
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+
 #### Compute Node
 **Add default route**
 sudo ip route add default via 192.168.50.1
@@ -131,7 +145,6 @@ network:
 
 
 sudo netplan apply
-
 
 **Disabling Wifi Route**
 sudo nmcli device set wlp5s0 managed no
