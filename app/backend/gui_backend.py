@@ -1,60 +1,25 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import base64
 import json
 import node_interface_ip
-from fastapi.templating import Jinja2Templates
+import asyncio
 import socket
 import threading
-from collections import deque
-from pathlib import Path
-import node_interface_ip
 
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+# Import ALL config settings
+from config import *
 
 app = FastAPI()
 templates = Jinja2Templates(directory=".")
-PENDING: dict[str, asyncio.Future] = {}
 
-
-# ---- CONFIG ----
-PATH_TO_SCRIPT = "/home/cluster/ELEC490-Capstone"
-MONITOR_PYTHON = "/home/cluster/vllm-venv/bin/python"
-NODE_POOL = ["node2", "node3", "node4", "node5"]
-# Monitoring
-MONITOR_PORT = 5000
-METRICS_SAMPLES_CAP = 60  # last N samples per node for live charts
-METRICS_LOG_DIR = Path(PATH_TO_SCRIPT) / "monitor" / "log"  # one <node>.jsonl per node
-# Optional: if SSH from headnode uses different hostnames, map logical name -> SSH hostname
-# e.g. {"node3": "Group15Cluster-3", "node4": "Group15Cluster-4"} when "node3" doesn't resolve
-MONITOR_SSH_HOSTS = {}  # default: use NODE_POOL name as SSH hostname
-# ----------------
-
-WAITING_FOR_NODE = 0
-
-EXECUTOR = ThreadPoolExecutor(max_workers=32)
+# Initialize per-node runtime state (depends on NODE_POOL)
+IN_FLIGHT.update({node: 0 for node in NODE_POOL})
 LOCKS = {node: asyncio.Lock() for node in NODE_POOL}
-
-# All connected websockets (no longer “assigned” to a node)
-ACTIVE_SESSIONS = set()
-
-# Global FIFO job queue: each item is (job_id, prompt, future)
-JOB_QUEUE: asyncio.Queue = asyncio.Queue()
-
-# Node availability tokens (free nodes live here)
-AVAILABLE_NODES: asyncio.Queue = asyncio.Queue()
-
-IN_FLIGHT = {node: 0 for node in NODE_POOL}
-
 DISPATCHER_TASK: asyncio.Task | None = None
-
-# ---- Monitoring ----
-# Last N samples per node (for charts); each entry is a metrics dict from monitor_agent
-_metrics_store: dict[str, deque] = {}
-_metrics_lock = threading.Lock()
-_monitoring_agents_started = False
 
 
 def _metrics_listener():
@@ -77,10 +42,10 @@ def _metrics_listener():
                     node_name = metrics.get("node_name")
                     if not node_name:
                         continue
-                    with _metrics_lock:
-                        if node_name not in _metrics_store:
-                            _metrics_store[node_name] = deque(maxlen=METRICS_SAMPLES_CAP)
-                        _metrics_store[node_name].append(metrics)
+                    with metrics_lock:
+                        if node_name not in metrics_store:
+                            metrics_store[node_name] = deque(maxlen=METRICS_SAMPLES_CAP)
+                        metrics_store[node_name].append(metrics)
                     try:
                         METRICS_LOG_DIR.mkdir(parents=True, exist_ok=True)
                         log_file = METRICS_LOG_DIR / f"{node_name}.jsonl"
@@ -329,21 +294,22 @@ def _ssh_stop_monitor_agent(node: str) -> bool:
 @app.post("/api/monitoring/start")
 async def monitoring_start():
     """Start monitor_agent on all nodes via SSH + tmux."""
-    global _monitoring_agents_started
+    global monitoring_agents_started
     loop = asyncio.get_running_loop()
     results = {}
     errors = {}
     for node in NODE_POOL:
         try:
-            ok, err = await loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
+            ok = await loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
+            err = None
             results[node] = ok
             if err:
                 errors[node] = err
         except Exception as e:
             results[node] = False
             errors[node] = str(e)
-    _monitoring_agents_started = any(results.values())
-    return {"ok": True, "agents": results, "agent_errors": errors, "monitoring_active": _monitoring_agents_started}
+    monitoring_agents_started = any(results.values())
+    return {"ok": True, "agents": results, "agent_errors": errors, "monitoring_active": monitoring_agents_started}
 
 
 @app.get("/api/monitoring/agent-status")
@@ -389,7 +355,7 @@ async def monitoring_diagnose(node: str):
 @app.post("/api/monitoring/stop")
 async def monitoring_stop():
     """Stop monitor_agent on all nodes."""
-    global _monitoring_agents_started
+    global monitoring_agents_started
     loop = asyncio.get_running_loop()
     results = {}
     for node in NODE_POOL:
@@ -398,16 +364,16 @@ async def monitoring_stop():
             results[node] = ok
         except Exception:
             results[node] = False
-    _monitoring_agents_started = False
+    monitoring_agents_started = False
     return {"ok": True, "agents": results, "monitoring_active": False}
 
 
 @app.get("/api/metrics")
 async def get_metrics():
     """Latest metrics and last N samples per node for charts; log is written to file."""
-    with _metrics_lock:
+    with metrics_lock:
         by_node = {}
-        for node, deq in _metrics_store.items():
+        for node, deq in metrics_store.items():
             samples = list(deq)
             by_node[node] = {
                 "latest": samples[-1] if samples else None,
@@ -415,14 +381,14 @@ async def get_metrics():
             }
     return {
         "by_node": by_node,
-        "monitoring_active": _monitoring_agents_started,
+        "monitoring_active": monitoring_agents_started,
         "log_path": str(METRICS_LOG_DIR),
     }
 
 
 @app.get("/api/monitoring/status")
 async def monitoring_status():
-    return {"monitoring_active": _monitoring_agents_started}
+    return {"monitoring_active": monitoring_agents_started}
 
 def _start_vllm_node(node: str):
     try:
