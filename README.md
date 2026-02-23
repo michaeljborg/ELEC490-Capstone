@@ -97,15 +97,15 @@ nvidia-smi
 ---
 ### IP Forwarding
 #### Headnode
-Enable IP Forwarding  
+**Enable IP Forwarding**  
 sudo sysctl -w net.ipv4.ip_forward=1  
 echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-cluster-forwarding.conf  
 
-Enable NAT  
+**Enable NAT**  
 ip route | grep default  
 sudo iptables -t nat -A POSTROUTING -s 192.168.50.0/24 -o enx9c69d3273282 -j MASQUERADE  
 
-Persist Rules  
+**Persist Rules**  
 sudo apt install -y iptables-persistent  
 sudo netfilter-persistent save  
 
@@ -117,7 +117,7 @@ ip route
 **Add DNS servers**  
 sudo nano /etc/systemd/resolved.conf  
 
-Paste in:  
+**Paste in:**  
 [Resolve]  
 DNS=8.8.8.8 1.1.1.1  
 FallbackDNS=9.9.9.9  
@@ -156,10 +156,10 @@ sudo netplan apply
 sudo nmcli device set wlp5s0 managed no  
 sudo ip link set wlp5s0 down  
 
-Disabling Wifi Route Reboot Reset  
+**Disabling Wifi Route Reboot Reset**  
 sudo nano /etc/NetworkManager/conf.d/99-disable-wifi.conf  
 
-paste:  
+**paste:**  
 [keyfile]  
 unmanaged-devices=interface-name:wlp5s0  
 
