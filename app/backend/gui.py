@@ -119,8 +119,10 @@ def ssh_relay(node: str, prompt: str) -> str:
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
 
     remote_cmd = (
-        f'cd "{PATH_TO_SCRIPT}/gui" && '
-        f'python3 -c "import base64, json, node_interface_ip; '
+        f'cd "{PATH_TO_SCRIPT}" && '
+        f'PYTHONPATH="{PATH_TO_SCRIPT}" '
+        f'python3 -c "import base64, json; '
+        f'from app.nodes import node_interface_ip; '
         f'd=json.loads(base64.b64decode(\'{b64}\').decode()); '
         f'print(node_interface_ip.query(**d))"'
     )
