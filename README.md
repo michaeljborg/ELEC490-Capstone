@@ -16,12 +16,12 @@ OS: Ubuntu 24.04.2 LTS
 ---
 ### Cluster Setup Steps
 (First two steps to undo incorrect setup)  
-**Check**
-`nmcli con show`
-**Delete**
-`sudo nmcli con delete "Wired connection 1"
-**Create**
-`sudo nano /etc/netplan/01-cluster-eno1.yaml`
+**Check**  
+`nmcli con show`  
+**Delete**  
+`sudo nmcli con delete "Wired connection 1"  
+**Create**  
+`sudo nano /etc/netplan/01-cluster-eno1.yaml`  
 
 **Paste in:**
 ```
