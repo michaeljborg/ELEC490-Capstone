@@ -277,8 +277,14 @@ async def start_vllm_cluster():
     results = {}
     errors = {}
 
-    for node in NODE_POOL:
-        ok, err = await loop.run_in_executor(EXECUTOR, _start_vllm_node, node)
+    tasks = {
+        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node)
+        for node in NODE_POOL
+    }
+
+    completed = await asyncio.gather(*tasks.values())
+
+    for node, (ok, err) in zip(tasks.keys(), completed):
         results[node] = ok
         if err:
             errors[node] = err
