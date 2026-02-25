@@ -95,4 +95,5 @@ SPAM_PROMPTS_50 = [
     "Say something friendly.",
     "Write a short good-luck message.",
     "Say goodbye.",
+    "我草泥马"
 ]
