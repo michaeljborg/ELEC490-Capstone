@@ -18,7 +18,7 @@ body {
     margin: 0;
     padding: 40px;
     font-family: 'Inter', sans-serif;
-    background: radial-gradient(circle at top left, #1e293b, #0f172a 60%);
+    background: #0f172a;
     color: var(--text);
     display: flex;
     gap: 30px;
@@ -48,9 +48,10 @@ body {
     border: 1px solid var(--border);
 }
 .status-card {
-    background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(124,58,237,0.08));
+    background: #0f172a;
+    border: 1px solid var(--border);
     padding: 20px;
-    border-radius: 14px;
+    border-radius: 12px;
     margin-bottom: 25px;
 }
 .highlight {
@@ -71,13 +72,23 @@ input[type="text"] {
     color: var(--text);
 }
 button {
-    padding: 14px 28px;
-    border-radius: 12px;
-    border: none;
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
-    color: white;
-    font-weight: bold;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: transparent;
+    color: var(--text);
+    font-weight: 600;
     cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+button:hover {
+    background: #1e293b;
+    border-color: #475569;
+}
+
+button:active {
+    background: #0f172a;
 }
 #output {
     height: 380px;
