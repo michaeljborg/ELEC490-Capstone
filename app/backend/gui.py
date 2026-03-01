@@ -109,11 +109,11 @@ async def websocket_status(websocket: WebSocket):
 # SSH RELAY
 # =============================
 
-def ssh_relay(node: str, prompt: str) -> str:
+def ssh_relay(node: str, messages: list) -> str:
     payload = {
         "ip": node_interface_ip.NODES[node],
-        "model": "Qwen/Qwen2.5-1.5B-Instruct",
-        "prompt": prompt,
+        "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+        "messages": messages, # Pass the list directly
     }
 
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
@@ -140,9 +140,9 @@ def ssh_relay(node: str, prompt: str) -> str:
     return proc.stdout.strip()
 
 
-async def run_on_node(node: str, prompt: str) -> str:
+async def run_on_node(node: str, messages: list) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, prompt)
+    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, messages)
 
 
 # =============================
@@ -203,14 +203,14 @@ async def relay(request: Request):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-
 @app.post("/enqueue")
 async def enqueue(request: Request):
     data = await request.json()
-    prompt = (data.get("prompt") or "").strip()
+    # Extract 'messages' instead of 'prompt'
+    messages = data.get("messages", [])
 
-    if not prompt:
-        return {"ok": False, "error": "Empty prompt"}
+    if not messages:
+        return {"ok": False, "error": "Empty messages"}
 
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
@@ -218,7 +218,8 @@ async def enqueue(request: Request):
 
     ahead = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
 
-    await JOB_QUEUE.put((job_id, prompt, fut))
+    # Put messages in the queue
+    await JOB_QUEUE.put((job_id, messages, fut))
     PENDING[job_id] = fut
 
     await broadcast_status()
@@ -251,7 +252,7 @@ async def wait(job_id: str):
 def _start_vllm_node(node: str):
     try:
         node_interface_ip.start(node)
-        node_interface_ip.wait_for_ready(node, timeout=120)
+        node_interface_ip.wait_for_ready(node, timeout=180)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -311,17 +312,16 @@ async def stop_vllm_cluster():
 # =============================
 @app.post("/spam50")
 async def spam50():
-    loop = asyncio.get_running_loop()
-
-    job_ids = []
-    ahead_before = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
-
+    # ... inside your loop ...
     for i, p in enumerate(SPAM_PROMPTS_50, start=1):
         fut = loop.create_future()
         job_id = f"spam-{i}-{int(loop.time()*1000)}"
+        
+        # Convert the string into a message list format
+        messages = [{"role": "user", "content": p}]
 
         PENDING[job_id] = fut
-        await JOB_QUEUE.put((job_id, p, fut))
+        await JOB_QUEUE.put((job_id, messages, fut)) # Pass messages here
         job_ids.append(job_id)
 
     await broadcast_status()

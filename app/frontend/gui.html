@@ -158,29 +158,53 @@ function appendLine(line) {
     box.scrollTop = box.scrollHeight;
 }
 
+let chatHistory = [];
+
 async function sendQuery() {
-    const prompt = document.getElementById("userPrompt").value;
+    const promptInput = document.getElementById("userPrompt");
+    const prompt = promptInput.value.trim();
     if (!prompt) return alert("Please enter a prompt.");
-    const job_id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    
+    promptInput.value = ""; // clear the input box
 
-    const enq = await fetch("/enqueue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, job_id })
-    });
+    const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
 
-    const enqData = await enq.json();
-    if (!enqData.ok) return appendLine("ERROR: " + enqData.error);
+    // 1. Add the user's new message to the history
+    chatHistory.push({ "role": "user", "content": prompt });
 
-    appendLine(`Queued prompt. ${enqData.ahead} ahead.`);
+    try {
+        // 2. Send the ENTIRE chat history, not just the prompt
+        const enq = await fetch("/enqueue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messages: chatHistory, job_id: job_id })
+        });
+        const enqData = await enq.json();
 
-    const res = await fetch("/wait/" + encodeURIComponent(job_id));
-    const data = await res.json();
+        if (!enqData.ok) {
+            appendLine("ERROR: " + enqData.error);
+            chatHistory.pop(); // Remove the prompt if it failed
+            return;
+        }
 
-    if (data.ok)
-        appendLine("RESPONSE [" + data.node + "]: " + data.line);
-    else
-        appendLine("ERROR: " + data.error);
+        appendLine(`[Queued] ${prompt}`);
+
+        // 3. Wait for completion
+        const res = await fetch("/wait/" + encodeURIComponent(job_id));
+        const data = await res.json();
+
+        if (data.ok) {
+            appendLine("RESPONSE [" + data.node + "]: " + data.line);
+            // 4. Add the node's response to the history so it remembers next time!
+            chatHistory.push({ "role": "assistant", "content": data.line });
+        } else {
+            appendLine("ERROR: " + data.error);
+            chatHistory.pop(); // Remove the prompt if it failed
+        }
+
+    } catch (e) {
+        appendLine("FETCH ERROR: " + e.message);
+    }
 }
 
 async function spam50() {
