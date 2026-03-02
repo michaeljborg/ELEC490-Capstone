@@ -11,6 +11,7 @@ from app.nodes import node_interface_ip
 # Import ALL config settings
 from app.config import *
 from app.config import SPAM_PROMPTS_50
+from app.config import AVAILABLE_MODELS
 
 # Import monitoring router + startup hook
 from app.backend.monitoring import router as monitoring_router
@@ -112,10 +113,10 @@ async def websocket_status(websocket: WebSocket):
 def ssh_relay(node: str, payload) -> str:
     data = {
         "ip": node_interface_ip.NODES[node],
-        "model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "model": CURRENT_MODEL,
     }
 
-    # 🔹 New logic: detect payload type
+    # detect payload type
     if isinstance(payload, list):
         data["messages"] = payload
     else:
@@ -210,6 +211,10 @@ async def relay(request: Request):
 
 @app.post("/enqueue")
 async def enqueue(request: Request):
+
+    if CURRENT_MODEL is None:
+        return {"ok": False, "error": "No model loaded"}
+
     data = await request.json()
 
     prompt = (data.get("prompt") or "").strip()
@@ -256,9 +261,9 @@ async def wait(job_id: str):
 # vLLM CONTROL
 # =============================
 
-def _start_vllm_node(node: str):
+def _start_vllm_node(node: str, model: str):
     try:
-        node_interface_ip.start(node)
+        node_interface_ip.start(node, model=model)
         node_interface_ip.wait_for_ready(node, timeout=120)
         return True, None
     except Exception as e:
@@ -280,28 +285,58 @@ def _stop_vllm_node(node: str):
 
 
 @app.post("/api/vllm/start")
-async def start_vllm_cluster():
+async def start_vllm_cluster(request: Request):
+    global CURRENT_MODEL
+
+    data = await request.json()
+    model = data.get("model")
+
+    if model not in AVAILABLE_MODELS:
+        return {"ok": False, "error": "Invalid model"}
+
     loop = asyncio.get_running_loop()
     results = {}
     errors = {}
 
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node)
+        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model)
         for node in NODE_POOL
     }
 
     completed = await asyncio.gather(*tasks.values())
 
+    all_ok = True
+
     for node, (ok, err) in zip(tasks.keys(), completed):
         results[node] = ok
         if err:
             errors[node] = err
+        if not ok:
+            all_ok = False
 
-    return {"ok": True, "nodes": results, "errors": errors}
+    if not all_ok:
+        return {
+            "ok": False,
+            "error": "Failed to start all nodes",
+            "nodes": results,
+            "errors": errors,
+        }
+
+    # Only set after successful startup
+    CURRENT_MODEL = model
+
+    return {
+        "ok": True,
+        "model": CURRENT_MODEL,
+        "nodes": results,
+        "errors": errors,
+    }
 
 
 @app.post("/api/vllm/stop")
 async def stop_vllm_cluster():
+    global CURRENT_MODEL
+
     loop = asyncio.get_running_loop()
     results = {}
     errors = {}
@@ -312,7 +347,14 @@ async def stop_vllm_cluster():
         if err:
             errors[node] = err
 
-    return {"ok": True, "nodes": results, "errors": errors}
+    CURRENT_MODEL = None
+
+    return {
+        "ok": True,
+        "model": CURRENT_MODEL,
+        "nodes": results,
+        "errors": errors,
+    }
 
 # =============================
 # Spam 50 

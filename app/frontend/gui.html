@@ -581,7 +581,20 @@
         updateSendGateUI();
         }
       try{
-        const res = await fetch('/api/vllm/start', { method:'POST' });
+        const model = document.getElementById("model-select").value;
+
+        if (!model){
+          addMessage("assistant", "Please select a model first.", "error");
+          return;
+        }
+
+        document.getElementById("model-select").disabled = true;
+
+        const res = await fetch('/api/vllm/start', {
+          method:'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model })
+        });
         const data = await res.json();
 
         for (const node in data.nodes) {
@@ -596,7 +609,12 @@
                 addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
             }
 }
-        addMessage("assistant", "Cluster startup complete.", "system");
+        if (data.ok && data.model){
+          document.getElementById("active-model-display").innerText =
+            "Active Model: " + data.model;
+
+          addMessage("assistant", "Active model: " + data.model, "system");
+        }
       }catch(e){
         addMessage("assistant", "ERROR: " + e.message, "error");
       }
@@ -619,6 +637,8 @@
             addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
           }
         }
+        document.getElementById("model-select").disabled = false;
+        document.getElementById("active-model-display").innerText = "No model loaded";
         addMessage("assistant", "Cluster shutdown complete.", "system");
       }catch(e){
         addMessage("assistant", "ERROR: " + e.message, "error");
@@ -756,10 +776,24 @@
             <input type="checkbox" id="enableHistory">
             Enable Chat History
           </label>
+          
+          <select id="model-select">
+          <option value="">Select Model</option>
+            <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
+            <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
+          </select>
 
           <button onclick="startVLLMCluster()">Start vLLM</button>
           <button onclick="stopVLLMCluster()">Stop vLLM</button>
           <button onclick="spam50()">Spam 50</button>
+        </div>
+        <div id="active-model-display" style="
+          font-size:12px;
+          color: var(--accent);
+          font-weight:700;
+          margin-top:6px;
+        ">
+          No model loaded
         </div>
       </div>
 

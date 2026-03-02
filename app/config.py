@@ -44,6 +44,13 @@ metrics_store: dict[str, deque] = {}
 metrics_lock = threading.Lock()
 monitoring_agents_started = False
 
+# Models
+AVAILABLE_MODELS = [
+    "Qwen/Qwen2.5-1.5B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct-AWQ",
+]
+
+# Test Prompts
 SPAM_PROMPTS_50 = [
     "Say hello.",
     "List 3 fruits.",

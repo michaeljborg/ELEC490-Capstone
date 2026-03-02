@@ -10,7 +10,7 @@ NODES = {
     "node6": "192.168.50.6",
 }
 
-def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
+def start(hostname, model: str):
     tmux_session = "vllm"
     venv_path = "~/vllm-venv"
     port = 8000
@@ -20,7 +20,7 @@ def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
     tmux kill-session -t {tmux_session} 2>/dev/null || true && \
     tmux new-session -d -s {tmux_session} '
         source {venv_path}/bin/activate && \
-        vllm serve {model} \
+        vllm serve --model {model} \
             --host 0.0.0.0 \
             --port {port} \
             --max-num-seqs {max_num_seqs}
@@ -61,7 +61,6 @@ def wait_for_ready(node_hostname, timeout=120):
     raise TimeoutError(f"vLLM on {node_hostname} failed to start within {timeout}s")
 
 
-# 🔹 UPDATED: now supports messages
 def query(ip, model, prompt=None, messages=None, timeout=60):
     port = 8000
     url = f"http://{ip}:{port}/v1/chat/completions"
