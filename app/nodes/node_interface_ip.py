@@ -20,10 +20,12 @@ def start(hostname, model: str):
     tmux kill-session -t {tmux_session} 2>/dev/null || true && \
     tmux new-session -d -s {tmux_session} '
         source {venv_path}/bin/activate && \
-        vllm serve --model {model} \
+        vllm serve {model} \
             --host 0.0.0.0 \
             --port {port} \
-            --max-num-seqs {max_num_seqs}
+            --max-num-seqs {max_num_seqs} \
+            --max-model-len {max_model_len} \
+            --gpu-memory-utilization {gpu_memory_utilization}
     '
     """
 
@@ -79,4 +81,4 @@ def query(ip, model, prompt=None, messages=None, timeout=60):
 
     r = requests.post(url, json=payload, timeout=timeout)
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    return r.json()["choices"][0]["message"]["content"] 
