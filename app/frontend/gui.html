@@ -1,382 +1,798 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Cluster Control Panel</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cluster Control Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<style>
-:root {
-    --bg: #0f172a;
-    --panel: rgba(30, 41, 59, 0.6);
-    --border: rgba(255,255,255,0.08);
-    --accent: #00f5ff;
-    --accent2: #7c3aed;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-}
-body {
-    margin: 0;
-    padding: 40px;
-    font-family: 'Inter', sans-serif;
-    background: #0f172a;
-    color: var(--text);
-    display: flex;
-    gap: 30px;
-    justify-content: center;
-}
-.sidebar {
-    width: 240px;
-    background: var(--panel);
-    backdrop-filter: blur(14px);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 25px;
-}
-.node-item {
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 14px;
-    display: flex;
-    justify-content: space-between;
-}
-.main-panel {
-    width: 720px;
-    background: var(--panel);
-    backdrop-filter: blur(14px);
-    border-radius: 18px;
-    padding: 35px;
-    border: 1px solid var(--border);
-}
-.status-card {
-    background: #0f172a;
-    border: 1px solid var(--border);
-    padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 25px;
-}
-.highlight {
-    color: var(--accent);
-    font-weight: 600;
-}
-.row {
-    display: flex;
-    gap: 15px;
-    margin-bottom: 20px;
-}
-input[type="text"] {
-    flex-grow: 1;
-    padding: 14px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: #0f172a;
-    color: var(--text);
-}
-button {
-    padding: 12px 20px;
-    border-radius: 8px;
-    border: 1px solid #334155;
-    background: transparent;
-    color: var(--text);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-button:hover {
-    background: #1e293b;
-    border-color: #475569;
-}
-button:active {
-    background: #0f172a;
-}
-#output {
-    height: 380px;
-    overflow-y: auto;
-    background: #020617;
-    border-radius: 14px;
-    padding: 20px;
-    font-family: monospace;
-    border: 1px solid var(--border);
-    white-space: pre-wrap;
-    color: #38bdf8;
-}
-.monitoring-panel {
-    width: 380px;
-    background: var(--panel);
-    backdrop-filter: blur(14px);
-    border-radius: 18px;
-    padding: 35px;
-    border: 1px solid var(--border);
-}
-.monitoring-controls {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 20px;
-}
-.monitoring-status {
-    color: var(--muted);
-    font-size: 14px;
-}
-.metrics-grid {
-    display: grid;
-    gap: 16px;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
-.metric-card {
-    background: #0f172a;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-}
-.metric-card h4 { margin: 0 0 10px 0; color: var(--accent); }
-.metric-card .row { margin-bottom: 6px; font-size: 13px; }
-.metric-card .label { color: var(--muted); }
-.metric-card .value { color: var(--text); font-weight: 600; }
-.log-note { font-size: 12px; color: var(--muted); margin-top: 16px; }
-</style>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:rgba(30,41,59,.55);
+      --border:rgba(255,255,255,.08);
+      --text:#e2e8f0;
+      --muted:#94a3b8;
 
-<script>
-const NODE_POOL = {{ node_pool_json | safe }};
-const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+      --bubble-user:#1f2a44;
+      --bubble-assistant:#121a2d;
 
-let metricsPollTimer = null;
-
-/* ===== CHAT HISTORY STATE ===== */
-let chatHistory = [];
-
-ws.onmessage = (event) => {
-    const status = JSON.parse(event.data);
-
-    NODE_POOL.forEach(node => {
-        const element = document.getElementById("status-" + node);
-        const inUse = status.in_flight && status.in_flight[node] > 0;
-        if (!element) return;
-        element.innerText = inUse ? "In Use" : "Free";
-        element.style.color = inUse ? "red" : "lime";
-    });
-
-    const q = document.getElementById("queue-depth");
-    if (q) q.innerText = status.queue_depth ?? 0;
-
-    const u = document.getElementById("user-count");
-    if (u) u.innerText = status.total_users ?? 0;
-};
-
-function appendLine(line) {
-    const box = document.getElementById("output");
-    const time = new Date().toLocaleTimeString();
-    box.textContent += "[" + time + "] " + line + "\n";
-    box.scrollTop = box.scrollHeight;
-}
-
-/* ===== UPDATED sendQuery (History Aware) ===== */
-async function sendQuery() {
-    const promptInput = document.getElementById("userPrompt");
-    const prompt = promptInput.value.trim();
-    if (!prompt) return alert("Please enter a prompt.");
-
-    const job_id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-    const historyEnabled = document.getElementById("enableHistory").checked;
-
-    let payload;
-
-    if (historyEnabled) {
-        chatHistory.push({ role: "user", content: prompt });
-        payload = { messages: chatHistory, job_id };
-    } else {
-        payload = { prompt, job_id };
+      --accent:#00f5ff;
+      --good:#35ff7a;
+      --bad:#ff4d4d;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
     }
 
-    promptInput.value = "";
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      padding:32px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(124,58,237,.18), transparent 60%),
+                  radial-gradient(900px 700px at 85% 40%, rgba(0,245,255,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      display:flex;
+      gap:24px;
+      justify-content:center;
+      align-items:flex-start;
+    }
 
-    const enq = await fetch("/enqueue", {
+    .sidebar{
+      width:260px;
+      background:var(--panel);
+      backdrop-filter: blur(14px);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:22px;
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 24px;
+    }
+
+    .sidebar h3{
+      margin:0 0 12px 0;
+      font-size:16px;
+      letter-spacing:.2px;
+    }
+
+    .node-item{
+      padding:10px 0;
+      border-bottom:1px solid var(--border);
+      font-size:13px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+    }
+    .node-item:last-child{ border-bottom:none; }
+    .node-pill{
+      font-size:12px;
+      padding:4px 10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background: rgba(2,6,23,.45);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .main{
+      width:min(900px, 100%);
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+
+    .topbar{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:18px 20px;
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow);
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .topbar h2{
+      margin:0;
+      font-size:18px;
+      font-weight:700;
+      letter-spacing:.2px;
+    }
+
+    .stats{
+      display:flex;
+      gap:18px;
+      align-items:center;
+      flex-wrap:wrap;
+      font-size:13px;
+      color: var(--muted);
+    }
+    .stats .num{
+      color: var(--accent);
+      font-weight:700;
+      padding-left:6px;
+    }
+
+    .controls{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top: 8px;
+    }
+
+    button{
+      padding:10px 14px;
+      border-radius:10px;
+      border:1px solid rgba(148,163,184,.25);
+      background: rgba(2,6,23,.35);
+      color: var(--text);
+      font-weight:650;
+      cursor:pointer;
+      transition: transform .08s ease, background .15s ease, border-color .15s ease;
+    }
+    button:hover{
+      background: rgba(30,41,59,.5);
+      border-color: rgba(148,163,184,.45);
+    }
+    button:active{ transform: translateY(1px); }
+
+    .toggle{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      color: var(--muted);
+      user-select:none;
+    }
+    .toggle input{ transform: translateY(1px); }
+
+    /* Chat container */
+    .chat-card{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:16px;
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow);
+      display:flex;
+      flex-direction:column;
+      height: min(72vh, 720px);
+      min-height: 520px;
+    }
+
+    .chat-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding: 2px 6px 12px 6px;
+      border-bottom:1px solid var(--border);
+      margin-bottom:12px;
+    }
+    .chat-header .hint{
+      font-size:12px;
+      color: var(--muted);
+    }
+
+    .messages{
+      flex:1;
+      overflow-y:auto;
+      padding: 8px 6px;
+      scroll-behavior:smooth;
+    }
+
+    .msg-row{
+      display:flex;
+      gap:10px;
+      margin: 10px 0;
+      align-items:flex-end;
+    }
+    .msg-row.user{ justify-content:flex-end; }
+    .msg-row.assistant{ justify-content:flex-start; }
+
+    .bubble{
+      max-width: 78%;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.08);
+      line-height:1.35;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      box-shadow: 0 6px 18px rgba(0,0,0,.18);
+    }
+    .bubble.user{
+      background: linear-gradient(180deg, rgba(124,58,237,.18), rgba(2,6,23,.15)),
+                  var(--bubble-user);
+      border-top-right-radius: 6px;
+    }
+    .bubble.assistant{
+      background: rgba(2,6,23,.25);
+      border-top-left-radius: 6px;
+    }
+
+    .meta{
+      font-size:11px;
+      color: rgba(148,163,184,.75);
+      padding: 0 2px;
+      min-width: 60px;
+    }
+    .msg-row.user .meta{ text-align:right; }
+
+    .typing{
+      display:inline-flex;
+      gap:5px;
+      align-items:center;
+    }
+    .dot{
+      width:6px; height:6px; border-radius:999px;
+      background: rgba(148,163,184,.8);
+      animation: blink 1.2s infinite ease-in-out;
+    }
+    .dot:nth-child(2){ animation-delay:.15s; }
+    .dot:nth-child(3){ animation-delay:.3s; }
+    @keyframes blink{
+      0%, 80%, 100% { opacity:.25; transform: translateY(0); }
+      40% { opacity:1; transform: translateY(-2px); }
+    }
+
+    /* Input bar */
+    .composer{
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top:1px solid var(--border);
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+    }
+    textarea{
+      flex:1;
+      resize:none;
+      min-height: 44px;
+      max-height: 180px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border:1px solid rgba(148,163,184,.25);
+      background: rgba(2,6,23,.35);
+      color: var(--text);
+      outline:none;
+      font-size:14px;
+      line-height:1.35;
+    }
+    textarea:focus{
+      border-color: rgba(0,245,255,.35);
+      box-shadow: 0 0 0 3px rgba(0,245,255,.08);
+    }
+
+    .send{
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,245,255,.25);
+      background: rgba(0,245,255,.08);
+      font-weight: 750;
+    }
+    .send:hover{
+      background: rgba(0,245,255,.12);
+      border-color: rgba(0,245,255,.4);
+    }
+
+    /* Monitoring panel (kept similar) */
+    .monitoring-panel{
+      width: 380px;
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      border-radius: 18px;
+      padding: 22px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 24px;
+      height: fit-content;
+    }
+    .monitoring-controls{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      margin-bottom: 12px;
+      flex-wrap:wrap;
+    }
+    .monitoring-status{
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .metrics-grid{
+      display:grid;
+      gap:12px;
+      grid-template-columns: 1fr;
+    }
+    .metric-card{
+      background: rgba(2,6,23,.35);
+      border:1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .metric-card h4{
+      margin:0 0 10px 0;
+      color: var(--accent);
+      font-size: 13px;
+      letter-spacing:.2px;
+    }
+    .metric-card .row{
+      display:flex;
+      justify-content:space-between;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .label{ color: var(--muted); }
+    .value{ color: var(--text); font-weight: 700; }
+    /* Make composer a positioning context for the popup */
+    .composer { position: relative; }
+
+    /* "Disabled-looking" send button (NOT actually disabled so we can intercept clicks) */
+    .send.disabled{
+    opacity: 0.35;
+    background: transparent;
+    border-color: rgba(148,163,184,.18);
+    }
+
+    /* Small red popup above Send */
+    .send-popup{
+    position: absolute;
+    right: 10px;          /* aligns above Send */
+    bottom: 62px;         /* sits just above the button */
+    background: rgba(255, 77, 77, 0.92);
+    color: #fff;
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.18);
+    box-shadow: 0 10px 24px rgba(0,0,0,.35);
+    display: none;
+    z-index: 50;
+    white-space: nowrap;
+    }
+    </style>
+
+  <script>
+    const NODE_POOL = {{ node_pool_json | safe }};
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+
+    let metricsPollTimer = null;
+
+    /* ===== CHAT HISTORY STATE ===== */
+    let chatHistory = [];
+
+    const nodeVllmState = Object.fromEntries(NODE_POOL.map(n => [n, "online"]));
+
+    ws.onmessage = (event) => {
+      const status = JSON.parse(event.data);
+
+      NODE_POOL.forEach(node => {
+        const el = document.getElementById("status-" + node);
+        if (!el) return;
+
+        const mode = nodeVllmState[node] || "online";
+        if (mode === "offline" || mode === "starting") {
+            setNodeStatus(node, mode);
+            return;
+        }
+
+        const inUse = status.in_flight && status.in_flight[node] > 0;
+        el.innerText = inUse ? "In Use" : "Free";
+        el.style.color = inUse ? "var(--bad)" : "var(--good)";
+        el.style.borderColor = inUse ? "rgba(255,77,77,.35)" : "rgba(53,255,122,.35)";
+        });
+
+      const q = document.getElementById("queue-depth");
+      if (q) q.innerText = status.queue_depth ?? 0;
+
+      const u = document.getElementById("user-count");
+      if (u) u.innerText = status.total_users ?? 0;
+    };
+
+    function nowTime(){
+      return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    }
+
+    function scrollMessagesToBottom(){
+      const box = document.getElementById("messages");
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Basic "markdown-ish" rendering: code blocks + inline code + line breaks.
+    // (Safe-ish because we escape HTML first.)
+    function renderText(text){
+      const escape = (s) => s
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;");
+
+      let t = escape(text);
+
+      // ```code``` blocks
+      t = t.replace(/```([\s\S]*?)```/g, (m, code) => {
+        return `<pre style="margin:10px 0; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.55); overflow:auto;"><code>${code}</code></pre>`;
+      });
+
+      // inline `code`
+      t = t.replace(/`([^`]+)`/g, `<code style="padding:2px 6px; border-radius:8px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.45);">$1</code>`);
+
+      // line breaks
+      t = t.replaceAll("\n","<br/>");
+      return t;
+    }
+
+    function addMessage(role, content, metaLabel=""){
+      const messages = document.getElementById("messages");
+
+      const row = document.createElement("div");
+      row.className = `msg-row ${role}`;
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = metaLabel || nowTime();
+
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${role}`;
+      bubble.innerHTML = renderText(content);
+
+      if (role === "user"){
+        row.appendChild(meta);
+        row.appendChild(bubble);
+      } else {
+        row.appendChild(bubble);
+        row.appendChild(meta);
+      }
+
+      messages.appendChild(row);
+      scrollMessagesToBottom();
+      return row;
+    }
+
+    function addTypingBubble(){
+      const messages = document.getElementById("messages");
+      const row = document.createElement("div");
+      row.className = "msg-row assistant";
+      row.id = "typing-row";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble assistant";
+      bubble.innerHTML = `<span class="typing">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      </span>`;
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = nowTime();
+
+      row.appendChild(bubble);
+      row.appendChild(meta);
+      messages.appendChild(row);
+      scrollMessagesToBottom();
+      return row;
+    }
+
+    function removeTypingBubble(){
+      const el = document.getElementById("typing-row");
+      if (el) el.remove();
+    }
+
+    function autoGrowTextarea(el){
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 180) + "px";
+    }
+
+    /* ===== UPDATED sendQuery (History Aware) ===== */
+    async function sendQuery(){
+    if (!clustersActive()) { showSendBlocked(); return; }
+      const input = document.getElementById("userPrompt");
+      const prompt = input.value.trim();
+      if (!prompt) return;
+
+      const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+      const historyEnabled = document.getElementById("enableHistory").checked;
+
+      // Render user's message bubble
+      addMessage("user", prompt);
+
+      let payload;
+      if (historyEnabled){
+        chatHistory.push({ role: "user", content: prompt });
+        payload = { messages: chatHistory, job_id };
+      } else {
+        payload = { prompt, job_id };
+      }
+
+      input.value = "";
+      autoGrowTextarea(input);
+
+      // show typing while waiting
+      addTypingBubble();
+
+      // enqueue
+      const enq = await fetch("/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-    });
+      });
 
-    const enqData = await enq.json();
-    if (!enqData.ok) {
-        appendLine("ERROR: " + enqData.error);
+      const enqData = await enq.json();
+      if (!enqData.ok){
+        removeTypingBubble();
+        addMessage("assistant", "ERROR: " + enqData.error, "error");
         if (historyEnabled) chatHistory.pop();
         return;
-    }
+      }
 
-    appendLine(`Queued prompt. ${enqData.ahead} ahead.`);
+      // you can optionally show a small system-ish assistant message about queue
+      // (comment out if you want it silent)
+      removeTypingBubble();
+      addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
 
-    const res = await fetch("/wait/" + encodeURIComponent(job_id));
-    const data = await res.json();
+      // wait for completion
+      const typing2 = addTypingBubble();
+      const res = await fetch("/wait/" + encodeURIComponent(job_id));
+      const data = await res.json();
+      removeTypingBubble();
 
-    if (data.ok) {
-        appendLine("RESPONSE [" + data.node + "]: " + data.line);
-        if (historyEnabled) {
-            chatHistory.push({ role: "assistant", content: data.line });
+      if (data.ok){
+        // Render assistant response
+        addMessage("assistant", data.line, data.node);
+
+        if (historyEnabled){
+          chatHistory.push({ role: "assistant", content: data.line });
         }
-    } else {
-        appendLine("ERROR: " + data.error);
+      } else {
+        addMessage("assistant", "ERROR: " + data.error, "error");
         if (historyEnabled) chatHistory.pop();
+      }
     }
-}
 
-async function spam50() {
-    appendLine("Enqueuing 50 prompts...");
-    const res = await fetch("/spam50", { method: "POST" });
-    const info = await res.json();
-    if (!info.ok) return appendLine("ERROR: " + info.error);
+    async function spam50(){
+      addMessage("assistant", "Enqueuing 50 prompts…", "system");
+      const res = await fetch("/spam50", { method: "POST" });
+      const info = await res.json();
+      if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
 
-    for (const job_id of info.job_ids) {
+      for (const job_id of info.job_ids){
+        const typing = addTypingBubble();
         const r = await fetch("/wait/" + encodeURIComponent(job_id));
         const data = await r.json();
-        if (data.ok)
-            appendLine(`RESPONSE [${data.node}]: ${data.line}`);
-        else
-            appendLine(`ERROR: ${data.error}`);
-    }
-}
+        removeTypingBubble();
 
-/* ===== START VLLM ===== */
-async function startVLLMCluster() {
-    appendLine("Starting vLLM on worker nodes...");
-    try {
-        const res = await fetch('/api/vllm/start', { method: 'POST' });
+        if (data.ok){
+          addMessage("assistant", data.line, data.node);
+        } else {
+          addMessage("assistant", "ERROR: " + data.error, "error");
+        }
+      }
+    }
+
+    /* ===== START/STOP VLLM ===== */
+    async function startVLLMCluster(){
+      addMessage("assistant", "Starting vLLM on worker nodes…", "system");
+      for (const node of NODE_POOL) {
+        nodeVllmState[node] = "starting";
+        setNodeStatus(node, "starting");
+        updateSendGateUI();
+        }
+      try{
+        const res = await fetch('/api/vllm/start', { method:'POST' });
         const data = await res.json();
 
         for (const node in data.nodes) {
             if (data.nodes[node]) {
-                appendLine("✔ " + node + " started successfully.");
+                nodeVllmState[node] = "online";     // back to Free/In Use from ws
+                // no need to call setNodeStatus for "online" (ws will render)
+                addMessage("assistant", "✔ " + node + " started.", "system");
             } else {
-                appendLine("✖ " + node + " failed: " + (data.errors[node] || "Unknown error"));
+                nodeVllmState[node] = "offline";
+                setNodeStatus(node, "offline");
+                updateSendGateUI();
+                addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
             }
-        }
-        appendLine("Cluster startup complete.");
-    } catch (e) {
-        appendLine("ERROR: " + e.message);
-    }
 }
+        addMessage("assistant", "Cluster startup complete.", "system");
+      }catch(e){
+        addMessage("assistant", "ERROR: " + e.message, "error");
+      }
+    }
 
-/* ===== STOP VLLM ===== */
-async function stopVLLMCluster() {
-    appendLine("Stopping vLLM on worker nodes...");
-    try {
-        const res = await fetch('/api/vllm/stop', { method: 'POST' });
+    async function stopVLLMCluster(){
+      addMessage("assistant", "Stopping vLLM on worker nodes…", "system");
+      try{
+        const res = await fetch('/api/vllm/stop', { method:'POST' });
         const data = await res.json();
 
-        for (const node in data.nodes) {
-            if (data.nodes[node]) {
-                appendLine("✔ " + node + " stopped successfully.");
-            } else {
-                appendLine("✖ " + node + " failed to stop: " + (data.errors[node] || "Unknown error"));
-            }
+        for (const node in data.nodes){
+          if (data.nodes[node]) {
+            nodeVllmState[node] = "offline";
+            setNodeStatus(node, "offline");
+            updateSendGateUI();
+            updateSendGateUI();
+            addMessage("assistant", "✔ " + node + " stopped.", "system");
+          } else {
+            addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
+          }
         }
-        appendLine("Cluster shutdown complete.");
-    } catch (e) {
-        appendLine("ERROR: " + e.message);
+        addMessage("assistant", "Cluster shutdown complete.", "system");
+      }catch(e){
+        addMessage("assistant", "ERROR: " + e.message, "error");
+        updateSendGateUI();
+      }
     }
-}
 
-/* ===== MONITORING ===== */
-function initMonitoringPanel() {
-    refreshMetrics();
-    if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
-}
+    function clustersActive() {
+    // Restrict if ANY node is offline or starting
+    return NODE_POOL.every(n => (nodeVllmState[n] || "online") === "online");
+    }
 
-async function startMonitoring() {
-    const res = await fetch('/api/monitoring/start', { method: 'POST' });
-    const data = await res.json();
-    document.getElementById('monitoring-status-text').innerText =
+    let popupTimer = null;
+    function showSendBlocked() {
+    const pop = document.getElementById("send-popup");
+    if (!pop) return;
+    pop.style.display = "block";
+    clearTimeout(popupTimer);
+    popupTimer = setTimeout(() => { pop.style.display = "none"; }, 1800);
+    }
+
+    function updateSendGateUI() {
+    const btn = document.querySelector("button.send");
+    if (!btn) return;
+    const active = clustersActive();
+    btn.classList.toggle("disabled", !active);
+    btn.setAttribute("aria-disabled", String(!active));
+    }
+
+    function setNodeStatus(node, mode) {
+        const el = document.getElementById("status-" + node);
+        if (!el) return;
+
+        // mode: "offline" | "starting" | "online"
+        if (mode === "offline") {
+            el.innerText = "Offline";
+            el.style.color = "#680C07";
+            el.style.borderColor = "rgba(66,12,9,.55)";
+            return;
+        }
+
+        if (mode === "starting") {
+            el.innerText = "Startup";
+            el.style.color = "orange";
+            el.style.borderColor = "rgba(255,165,0,.45)";
+            return;
+        }
+
+        // online: show Free/In Use using in-flight info (color set by ws handler below)
+        // actual text/color is handled in ws.onmessage, so do nothing here
+        }
+
+    /* ===== MONITORING (unchanged but styled) ===== */
+    function initMonitoringPanel(){
+      refreshMetrics();
+      if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
+    }
+
+    async function startMonitoring(){
+      const res = await fetch('/api/monitoring/start', { method:'POST' });
+      const data = await res.json();
+      document.getElementById('monitoring-status-text').innerText =
         data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
-    refreshMetrics();
-}
+      refreshMetrics();
+    }
 
-async function stopMonitoring() {
-    const res = await fetch('/api/monitoring/stop', { method: 'POST' });
-    await res.json();
-    document.getElementById('monitoring-status-text').innerText = 'Stopped';
-    refreshMetrics();
-}
+    async function stopMonitoring(){
+      const res = await fetch('/api/monitoring/stop', { method:'POST' });
+      await res.json();
+      document.getElementById('monitoring-status-text').innerText = 'Stopped';
+      refreshMetrics();
+    }
 
-async function refreshMetrics() {
-    const res = await fetch('/api/metrics');
-    const data = await res.json();
-    const container = document.getElementById('metrics-container');
-    if (!container) return;
+    async function refreshMetrics(){
+      const res = await fetch('/api/metrics');
+      const data = await res.json();
+      const container = document.getElementById('metrics-container');
+      if (!container) return;
 
-    let html = '';
-    for (const node of NODE_POOL) {
+      let html = '';
+      for (const node of NODE_POOL){
         const info = data.by_node[node];
         const latest = info && info.latest ? info.latest : null;
 
         html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
-        if (!latest) {
-            html += '<div class="row"><span class="label">No data</span></div>';
+        if (!latest){
+          html += '<div class="row"><span class="label">No data</span></div>';
         } else {
-            html += '<div class="row"><span class="label">CPU:</span> <span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
-            html += '<div class="row"><span class="label">RAM:</span> <span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
-            html += '<div class="row"><span class="label">GPU:</span> <span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
+          html += '<div class="row"><span class="label">CPU</span><span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
+          html += '<div class="row"><span class="label">RAM</span><span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
+          html += '<div class="row"><span class="label">GPU</span><span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
         }
         html += '</div>';
+      }
+      container.innerHTML = html;
     }
 
-    container.innerHTML = html;
-}
+    document.addEventListener('DOMContentLoaded', () => {
+      initMonitoringPanel();
 
-document.addEventListener('DOMContentLoaded', initMonitoringPanel);
-</script>
+      // textarea autosize + enter-to-send (shift+enter for newline)
+      const ta = document.getElementById("userPrompt");
+      ta.addEventListener("input", () => autoGrowTextarea(ta));
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey){
+            e.preventDefault();
+            if (!clustersActive()) return showSendBlocked();
+            sendQuery();
+        }
+        });
+
+      // Optional: greet
+      addMessage("assistant", "Ready. Send a prompt to the cluster.", "system");
+    });
+  </script>
 </head>
 
 <body>
-
-<div class="sidebar">
+  <div class="sidebar">
     <h3>Cluster Status</h3>
     {% for node in node_pool %}
     <div class="node-item">
-        <strong>{{ node.upper() }}:</strong>
-        <span id="status-{{ node }}">Free</span>
+      <strong>{{ node.upper() }}:</strong>
+      <span id="status-{{ node }}" class="node-pill">Free</span>
     </div>
     {% endfor %}
-</div>
+  </div>
 
-<div class="main-panel">
-    <h2>Cluster Control Panel</h2>
-
-    <div class="status-card">
-        <div><strong>Queue Depth:</strong>
-            <span id="queue-depth" class="highlight">0</span>
-        </div>
-        <div><strong>Connected Users:</strong>
-            <span id="user-count" class="highlight">0</span>
-        </div>
-    </div>
-
-    <!-- 🔹 History Toggle Added -->
-    <div style="margin-bottom:10px;">
-        <label style="font-size:14px; color:var(--muted);">
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h2>Cluster Control Panel</h2>
+        <div class="controls">
+          <label class="toggle">
             <input type="checkbox" id="enableHistory">
             Enable Chat History
-        </label>
+          </label>
+
+          <button onclick="startVLLMCluster()">Start vLLM</button>
+          <button onclick="stopVLLMCluster()">Stop vLLM</button>
+          <button onclick="spam50()">Spam 50</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div>Queue Depth:<span id="queue-depth" class="num">0</span></div>
+        <div>Connected Users:<span id="user-count" class="num">0</span></div>
+      </div>
     </div>
 
-    <div class="row">
-        <input type="text" id="userPrompt" placeholder="Enter prompt..." onkeydown="if(event.key==='Enter') sendQuery()">
-        <button onclick="sendQuery()">Run Query</button>
-        <button onclick="spam50()">Spam 50</button>
-        <button onclick="startVLLMCluster()">Start vLLM Cluster</button>
-        <button onclick="stopVLLMCluster()">Stop vLLM Cluster</button>
+    <div class="chat-card">
+      <div class="chat-header">
+        <div class="hint">Shift+Enter = newline • Enter = send</div>
+        <div class="hint">Responses are tagged with node id</div>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <div class="composer">
+        <textarea id="userPrompt" placeholder="Message the cluster…"></textarea>
+        <button class="send" onclick="if(!clustersActive()) showSendBlocked(); else sendQuery();">Send</button>
+        <div id="send-popup" class="send-popup">Clusters not active yet, please wait.</div>
+      </div>
     </div>
+  </div>
 
-    <div id="output"></div>
-</div>
-
-<div class="monitoring-panel">
-    <h3>Cluster Monitoring</h3>
+  <div class="monitoring-panel">
+    <h3 style="margin:0 0 10px 0;">Cluster Monitoring</h3>
     <div class="monitoring-controls">
-        <button onclick="startMonitoring()">Start Monitoring</button>
-        <button onclick="stopMonitoring()">Stop Monitoring</button>
-        <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
+      <button onclick="startMonitoring()">Start</button>
+      <button onclick="stopMonitoring()">Stop</button>
+      <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
     </div>
     <div id="metrics-container" class="metrics-grid"></div>
-</div>
-
+  </div>
 </body>
 </html>
