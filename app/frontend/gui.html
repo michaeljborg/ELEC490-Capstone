@@ -330,8 +330,6 @@
     }
     .label{ color: var(--muted); }
     .value{ color: var(--text); font-weight: 700; }
-    /* Make composer a positioning context for the popup */
-    .composer { position: relative; }
     </style>
 
   <script>
@@ -555,7 +553,6 @@
       for (const node of NODE_POOL) {
         nodeVllmState[node] = "starting";
         setNodeStatus(node, "starting");
-        updateSendGateUI();
         }
       try{
         const model = document.getElementById("model-select").value;
@@ -591,7 +588,6 @@
             } else {
                 nodeVllmState[node] = "offline";
                 setNodeStatus(node, "offline");
-                updateSendGateUI();
                 addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
             }
 }
@@ -616,8 +612,6 @@
           if (data.nodes[node]) {
             nodeVllmState[node] = "offline";
             setNodeStatus(node, "offline");
-            updateSendGateUI();
-            updateSendGateUI();
             addMessage("assistant", "✔ " + node + " stopped.", "system");
           } else {
             addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
@@ -628,21 +622,7 @@
         addMessage("assistant", "Cluster shutdown complete.", "system");
       }catch(e){
         addMessage("assistant", "ERROR: " + e.message, "error");
-        updateSendGateUI();
       }
-    }
-
-    function clustersActive() {
-    // Restrict if ANY node is offline or starting
-    return NODE_POOL.every(n => (nodeVllmState[n] || "online") === "online");
-    }
-
-    function updateSendGateUI() {
-    const btn = document.querySelector("button.send");
-    if (!btn) return;
-    const active = clustersActive();
-    btn.classList.toggle("disabled", !active);
-    btn.setAttribute("aria-disabled", String(!active));
     }
 
     function setNodeStatus(node, mode) {
@@ -692,8 +672,6 @@
           document.getElementById("active-model-display").innerText =
             "No model loaded";
         }
-
-        updateSendGateUI();
 
       } catch (err) {
         console.error("Failed to sync cluster state:", err);
