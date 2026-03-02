@@ -691,6 +691,37 @@
         // actual text/color is handled in ws.onmessage, so do nothing here
         }
 
+    async function syncClusterState() {
+      try {
+        const res = await fetch("/api/vllm/status");
+        const data = await res.json();
+
+        let anyOnline = false;
+
+        for (const node of NODE_POOL) {
+          if (data.nodes[node]) {
+            nodeVllmState[node] = "online";
+            anyOnline = true;
+          } else {
+            nodeVllmState[node] = "offline";
+            setNodeStatus(node, "offline");
+          }
+        }
+
+        if (anyOnline) {
+          document.getElementById("active-model-display").innerText =
+            "Active Model: Running";
+        } else {
+          document.getElementById("active-model-display").innerText =
+            "No model loaded";
+        }
+
+        updateSendGateUI();
+
+      } catch (err) {
+        console.error("Failed to sync cluster state:", err);
+      }
+    }
     /* ===== MONITORING (unchanged but styled) ===== */
     function initMonitoringPanel(){
       refreshMetrics();
@@ -736,8 +767,10 @@
       container.innerHTML = html;
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       initMonitoringPanel();
+      
+      await syncClusterState();
 
       // textarea autosize + enter-to-send (shift+enter for newline)
       const ta = document.getElementById("userPrompt");

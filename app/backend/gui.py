@@ -2,6 +2,7 @@ import subprocess
 import base64
 import json
 import asyncio
+import requests
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -22,6 +23,8 @@ templates = Jinja2Templates(directory="app/frontend")
 
 # Mount monitoring routes
 app.include_router(monitoring_router)
+
+CURRENT_MODEL: str | None = None
 
 # Initialize per-node runtime state (depends on NODE_POOL)
 IN_FLIGHT.update({node: 0 for node in NODE_POOL})
@@ -261,6 +264,15 @@ async def wait(job_id: str):
 # vLLM CONTROL
 # =============================
 
+def _check_vllm_node(node: str):
+    try:
+        ip = node_interface_ip.NODES[node]
+        url = f"http://{ip}:8000/health"
+        r = requests.get(url, timeout=2)
+        return r.status_code == 200
+    except Exception as e:
+        return False
+
 def _start_vllm_node(node: str, model: str):
     try:
         node_interface_ip.start(node, model=model)
@@ -354,6 +366,26 @@ async def stop_vllm_cluster():
         "model": CURRENT_MODEL,
         "nodes": results,
         "errors": errors,
+    }
+
+@app.get("/api/vllm/status")
+async def vllm_status():
+    loop = asyncio.get_running_loop()
+
+    tasks = {
+        node: loop.run_in_executor(EXECUTOR, _check_vllm_node, node)
+        for node in NODE_POOL
+    }
+
+    results = await asyncio.gather(*tasks.values())
+    node_status = dict(zip(tasks.keys(), results))
+
+    # Determine if at least one node is alive
+    model_active = any(node_status.values())
+
+    return {
+        "model": CURRENT_MODEL if model_active else None,
+        "nodes": node_status
     }
 
 # =============================
