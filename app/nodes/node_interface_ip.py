@@ -42,11 +42,9 @@ def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
 
 def wait_for_ready(node_hostname, timeout=120):
     import time
-
     ip = NODES[node_hostname]
     port = 8000
     url = f"http://{ip}:{port}/health"
-
     start_time = time.time()
     print(f"Waiting for vLLM on {node_hostname} to finish startup...")
 
@@ -58,19 +56,24 @@ def wait_for_ready(node_hostname, timeout=120):
                 return True
         except requests.exceptions.ConnectionError:
             pass
-
         time.sleep(5)
 
     raise TimeoutError(f"vLLM on {node_hostname} failed to start within {timeout}s")
 
 
-def query(ip, model, prompt, timeout=60):
+# 🔹 UPDATED: now supports messages
+def query(ip, model, prompt=None, messages=None, timeout=60):
     port = 8000
     url = f"http://{ip}:{port}/v1/chat/completions"
 
+    if messages:
+        payload_messages = messages
+    else:
+        payload_messages = [{"role": "user", "content": prompt}]
+
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": payload_messages,
         "max_tokens": 1024,
         "temperature": 0.7,
     }

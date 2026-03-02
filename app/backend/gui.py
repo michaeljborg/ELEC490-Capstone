@@ -109,14 +109,19 @@ async def websocket_status(websocket: WebSocket):
 # SSH RELAY
 # =============================
 
-def ssh_relay(node: str, prompt: str) -> str:
-    payload = {
+def ssh_relay(node: str, payload) -> str:
+    data = {
         "ip": node_interface_ip.NODES[node],
         "model": "Qwen/Qwen2.5-1.5B-Instruct",
-        "prompt": prompt,
     }
 
-    b64 = base64.b64encode(json.dumps(payload).encode()).decode()
+    # 🔹 New logic: detect payload type
+    if isinstance(payload, list):
+        data["messages"] = payload
+    else:
+        data["prompt"] = payload
+
+    b64 = base64.b64encode(json.dumps(data).encode()).decode()
 
     remote_cmd = (
         f'cd "{PATH_TO_SCRIPT}" && '
@@ -140,10 +145,9 @@ def ssh_relay(node: str, prompt: str) -> str:
     return proc.stdout.strip()
 
 
-async def run_on_node(node: str, prompt: str) -> str:
+async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, prompt)
-
+    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, payload)
 
 # =============================
 # DISPATCH LOOP
@@ -153,7 +157,7 @@ async def dispatch_loop():
     global WAITING_FOR_NODE
 
     while True:
-        job_id, prompt, fut = await JOB_QUEUE.get()
+        job_id, payload, fut = await JOB_QUEUE.get()
 
         WAITING_FOR_NODE += 1
         await broadcast_status()
@@ -164,9 +168,9 @@ async def dispatch_loop():
         IN_FLIGHT[node] += 1
         await broadcast_status()
 
-        async def _do(job_id=job_id, node=node, prompt=prompt, fut=fut):
+        async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
             try:
-                result = await run_on_node(node, prompt)
+                result = await run_on_node(node, payload)
                 if not fut.cancelled():
                     fut.set_result((node, result))
             except Exception as e:
@@ -207,10 +211,12 @@ async def relay(request: Request):
 @app.post("/enqueue")
 async def enqueue(request: Request):
     data = await request.json()
-    prompt = (data.get("prompt") or "").strip()
 
-    if not prompt:
-        return {"ok": False, "error": "Empty prompt"}
+    prompt = (data.get("prompt") or "").strip()
+    messages = data.get("messages")
+
+    if not prompt and not messages:
+        return {"ok": False, "error": "Empty input"}
 
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
@@ -218,7 +224,9 @@ async def enqueue(request: Request):
 
     ahead = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
 
-    await JOB_QUEUE.put((job_id, prompt, fut))
+    payload = messages if messages else prompt
+
+    await JOB_QUEUE.put((job_id, payload, fut))
     PENDING[job_id] = fut
 
     await broadcast_status()
