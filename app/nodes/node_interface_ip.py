@@ -15,6 +15,8 @@ def start(hostname, model: str):
     venv_path = "~/vllm-venv"
     port = 8000
     max_num_seqs = 32
+    max_model_len = 4096
+    gpu_memory_utilization = 0.92
 
     remote_cmd = f"""
     tmux kill-session -t {tmux_session} 2>/dev/null || true && \
