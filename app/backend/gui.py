@@ -299,7 +299,6 @@ def _stop_vllm_node(node: str):
 @app.post("/api/vllm/start")
 async def start_vllm_cluster(request: Request):
     global CURRENT_MODEL
-
     data = await request.json()
     model = data.get("model")
 
@@ -348,13 +347,19 @@ async def start_vllm_cluster(request: Request):
 @app.post("/api/vllm/stop")
 async def stop_vllm_cluster():
     global CURRENT_MODEL
-
     loop = asyncio.get_running_loop()
     results = {}
     errors = {}
 
-    for node in NODE_POOL:
-        ok, err = await loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
+    # Launch all stop operations in parallel
+    tasks = {
+        node: loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
+        for node in NODE_POOL
+    }
+
+    completed = await asyncio.gather(*tasks.values())
+
+    for node, (ok, err) in zip(tasks.keys(), completed):
         results[node] = ok
         if err:
             errors[node] = err

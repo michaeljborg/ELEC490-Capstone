@@ -34,6 +34,8 @@
       gap:24px;
       justify-content:center;
       align-items:flex-start;
+      min-height: 100vh;
+      background-attachment: fixed;
     }
 
     .sidebar{
@@ -330,30 +332,6 @@
     .value{ color: var(--text); font-weight: 700; }
     /* Make composer a positioning context for the popup */
     .composer { position: relative; }
-
-    /* "Disabled-looking" send button (NOT actually disabled so we can intercept clicks) */
-    .send.disabled{
-    opacity: 0.35;
-    background: transparent;
-    border-color: rgba(148,163,184,.18);
-    }
-
-    /* Small red popup above Send */
-    .send-popup{
-    position: absolute;
-    right: 10px;          /* aligns above Send */
-    bottom: 62px;         /* sits just above the button */
-    background: rgba(255, 77, 77, 0.92);
-    color: #fff;
-    font-size: 12px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,.18);
-    box-shadow: 0 10px 24px rgba(0,0,0,.35);
-    display: none;
-    z-index: 50;
-    white-space: nowrap;
-    }
     </style>
 
   <script>
@@ -488,7 +466,6 @@
 
     /* ===== UPDATED sendQuery (History Aware) ===== */
     async function sendQuery(){
-    if (!clustersActive()) { showSendBlocked(); return; }
       const input = document.getElementById("userPrompt");
       const prompt = input.value.trim();
       if (!prompt) return;
@@ -599,9 +576,18 @@
 
         for (const node in data.nodes) {
             if (data.nodes[node]) {
-                nodeVllmState[node] = "online";     // back to Free/In Use from ws
-                // no need to call setNodeStatus for "online" (ws will render)
+                nodeVllmState[node] = "online";
+
+                // Immediately render as Free (no in-flight jobs yet)
+                const el = document.getElementById("status-" + node);
+                if (el) {
+                    el.innerText = "Free";
+                    el.style.color = "var(--good)";
+                    el.style.borderColor = "rgba(53,255,122,.35)";
+                }
+
                 addMessage("assistant", "✔ " + node + " started.", "system");
+                
             } else {
                 nodeVllmState[node] = "offline";
                 setNodeStatus(node, "offline");
@@ -649,15 +635,6 @@
     function clustersActive() {
     // Restrict if ANY node is offline or starting
     return NODE_POOL.every(n => (nodeVllmState[n] || "online") === "online");
-    }
-
-    let popupTimer = null;
-    function showSendBlocked() {
-    const pop = document.getElementById("send-popup");
-    if (!pop) return;
-    pop.style.display = "block";
-    clearTimeout(popupTimer);
-    popupTimer = setTimeout(() => { pop.style.display = "none"; }, 1800);
     }
 
     function updateSendGateUI() {
@@ -778,10 +755,9 @@
       ta.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey){
             e.preventDefault();
-            if (!clustersActive()) return showSendBlocked();
             sendQuery();
         }
-        });
+      });
 
       // Optional: greet
       addMessage("assistant", "Ready. Send a prompt to the cluster.", "system");
@@ -846,8 +822,7 @@
 
       <div class="composer">
         <textarea id="userPrompt" placeholder="Message the cluster…"></textarea>
-        <button class="send" onclick="if(!clustersActive()) showSendBlocked(); else sendQuery();">Send</button>
-        <div id="send-popup" class="send-popup">Clusters not active yet, please wait.</div>
+        <button class="send" onclick="sendQuery()">Send</button>
       </div>
     </div>
   </div>
