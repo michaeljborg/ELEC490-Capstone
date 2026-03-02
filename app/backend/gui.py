@@ -393,6 +393,21 @@ async def vllm_status():
         "nodes": node_status
     }
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("Backend shutting down. Stopping vLLM cluster...")
+
+    loop = asyncio.get_running_loop()
+
+    for node in NODE_POOL:
+        try:
+            await loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
+            print(f"Stopped vLLM on {node}")
+        except Exception as e:
+            print(f"Failed to stop vLLM on {node}: {e}")
+
+    print("Cluster shutdown complete.")
+
 # =============================
 # Spam 50 
 # =============================
