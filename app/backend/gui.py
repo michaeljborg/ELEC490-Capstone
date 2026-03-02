@@ -74,6 +74,8 @@ async def startup_event():
     # Start monitoring TCP listener (now lives in monitoring_backend)
     start_metrics_listener()
 
+    # Initial state fix
+    await reconstruct_cluster_state()
 
 # =============================
 # ROOT PAGE
@@ -295,6 +297,25 @@ def _stop_vllm_node(node: str):
     except Exception as e:
         return False, str(e)
 
+async def reconstruct_cluster_state():
+    global CURRENT_MODEL
+
+    loop = asyncio.get_running_loop()
+
+    tasks = {
+        node: loop.run_in_executor(EXECUTOR, _check_vllm_node, node)
+        for node in NODE_POOL
+    }
+
+    results = await asyncio.gather(*tasks.values())
+    node_status = dict(zip(tasks.keys(), results))
+
+    if any(node_status.values()):
+        # We know vLLM is running, but we don't know which model.
+        # For now, mark it as "Unknown Running"
+        CURRENT_MODEL = "Unknown (already running)"
+    else:
+        CURRENT_MODEL = None
 
 @app.post("/api/vllm/start")
 async def start_vllm_cluster(request: Request):
@@ -385,11 +406,8 @@ async def vllm_status():
     results = await asyncio.gather(*tasks.values())
     node_status = dict(zip(tasks.keys(), results))
 
-    # Determine if at least one node is alive
-    model_active = any(node_status.values())
-
     return {
-        "model": CURRENT_MODEL if model_active else None,
+        "model": CURRENT_MODEL,
         "nodes": node_status
     }
 

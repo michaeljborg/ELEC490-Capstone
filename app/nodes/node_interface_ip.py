@@ -25,6 +25,7 @@ def start(hostname, model: str):
         vllm serve {model} \
             --host 0.0.0.0 \
             --port {port} \
+            --api-type openai \
             --max-num-seqs {max_num_seqs} \
             --max-model-len {max_model_len} \
             --gpu-memory-utilization {gpu_memory_utilization}
