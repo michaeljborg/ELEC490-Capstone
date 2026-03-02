@@ -81,12 +81,10 @@ button {
     cursor: pointer;
     transition: all 0.15s ease;
 }
-
 button:hover {
     background: #1e293b;
     border-color: #475569;
 }
-
 button:active {
     background: #0f172a;
 }
@@ -144,6 +142,9 @@ const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
 let metricsPollTimer = null;
 
+/* ===== CHAT HISTORY STATE ===== */
+let chatHistory = [];
+
 ws.onmessage = (event) => {
     const status = JSON.parse(event.data);
 
@@ -169,29 +170,53 @@ function appendLine(line) {
     box.scrollTop = box.scrollHeight;
 }
 
+/* ===== UPDATED sendQuery (History Aware) ===== */
 async function sendQuery() {
-    const prompt = document.getElementById("userPrompt").value;
+    const promptInput = document.getElementById("userPrompt");
+    const prompt = promptInput.value.trim();
     if (!prompt) return alert("Please enter a prompt.");
+
     const job_id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    const historyEnabled = document.getElementById("enableHistory").checked;
+
+    let payload;
+
+    if (historyEnabled) {
+        chatHistory.push({ role: "user", content: prompt });
+        payload = { messages: chatHistory, job_id };
+    } else {
+        payload = { prompt, job_id };
+    }
+
+    promptInput.value = "";
 
     const enq = await fetch("/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, job_id })
+        body: JSON.stringify(payload)
     });
 
     const enqData = await enq.json();
-    if (!enqData.ok) return appendLine("ERROR: " + enqData.error);
+    if (!enqData.ok) {
+        appendLine("ERROR: " + enqData.error);
+        if (historyEnabled) chatHistory.pop();
+        return;
+    }
 
     appendLine(`Queued prompt. ${enqData.ahead} ahead.`);
 
     const res = await fetch("/wait/" + encodeURIComponent(job_id));
     const data = await res.json();
 
-    if (data.ok)
+    if (data.ok) {
         appendLine("RESPONSE [" + data.node + "]: " + data.line);
-    else
+        if (historyEnabled) {
+            chatHistory.push({ role: "assistant", content: data.line });
+        }
+    } else {
         appendLine("ERROR: " + data.error);
+        if (historyEnabled) chatHistory.pop();
+    }
 }
 
 async function spam50() {
@@ -322,6 +347,14 @@ document.addEventListener('DOMContentLoaded', initMonitoringPanel);
         <div><strong>Connected Users:</strong>
             <span id="user-count" class="highlight">0</span>
         </div>
+    </div>
+
+    <!-- 🔹 History Toggle Added -->
+    <div style="margin-bottom:10px;">
+        <label style="font-size:14px; color:var(--muted);">
+            <input type="checkbox" id="enableHistory">
+            Enable Chat History
+        </label>
     </div>
 
     <div class="row">
