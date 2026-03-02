@@ -10,11 +10,13 @@ NODES = {
     "node6": "192.168.50.6",
 }
 
-def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
+def start(hostname, model: str):
     tmux_session = "vllm"
     venv_path = "~/vllm-venv"
     port = 8000
     max_num_seqs = 32
+    max_model_len = 4096
+    gpu_memory_utilization = 0.92
 
     remote_cmd = f"""
     tmux kill-session -t {tmux_session} 2>/dev/null || true && \
@@ -23,7 +25,9 @@ def start(hostname, model="Qwen/Qwen2.5-1.5B-Instruct"):
         vllm serve {model} \
             --host 0.0.0.0 \
             --port {port} \
-            --max-num-seqs {max_num_seqs}
+            --max-num-seqs {max_num_seqs} \
+            --max-model-len {max_model_len} \
+            --gpu-memory-utilization {gpu_memory_utilization}
     '
     """
 
@@ -61,7 +65,6 @@ def wait_for_ready(node_hostname, timeout=120):
     raise TimeoutError(f"vLLM on {node_hostname} failed to start within {timeout}s")
 
 
-# 🔹 UPDATED: now supports messages
 def query(ip, model, prompt=None, messages=None, timeout=60):
     port = 8000
     url = f"http://{ip}:{port}/v1/chat/completions"
@@ -80,4 +83,4 @@ def query(ip, model, prompt=None, messages=None, timeout=60):
 
     r = requests.post(url, json=payload, timeout=timeout)
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    return r.json()["choices"][0]["message"]["content"] 
