@@ -31,6 +31,8 @@ IN_FLIGHT.update({node: 0 for node in NODE_POOL})
 LOCKS = {node: asyncio.Lock() for node in NODE_POOL}
 DISPATCHER_TASK: asyncio.Task | None = None
 
+NODE_HEALTHY = {node: True for node in NODE_POOL}
+
 
 # =============================
 # STATUS BROADCAST
@@ -45,6 +47,7 @@ async def broadcast_status():
         "waiting_for_node": WAITING_FOR_NODE,
         "in_flight": dict(IN_FLIGHT),
         "total_users": len(ACTIVE_SESSIONS),
+        "node_healthy": dict(NODE_HEALTHY)
     }
 
     for ws in list(ACTIVE_SESSIONS):
@@ -63,15 +66,21 @@ NODE_CONCURRENCY = 1
 
 @app.on_event("startup")
 async def startup_event():
-    # Seed node availability queue
-    for node in NODE_POOL:
-        for _ in range(NODE_CONCURRENCY):
-            AVAILABLE_NODES.put_nowait(node)
+    loop = asyncio.get_running_loop()
 
-    # Start dispatch loop
+    # Only schedule nodes we can SSH into
+    checks = {node: loop.run_in_executor(EXECUTOR, _ssh_ok, node) for node in NODE_POOL}
+    results = await asyncio.gather(*checks.values())
+
+    for node, ok in zip(checks.keys(), results):
+        NODE_HEALTHY[node] = ok
+        if ok:
+            for _ in range(NODE_CONCURRENCY):
+                AVAILABLE_NODES.put_nowait(node)
+        else:
+            print(f"[WARN] {node} unreachable via SSH; skipping")
+
     asyncio.create_task(dispatch_loop())
-
-    # Start monitoring TCP listener (now lives in monitoring_backend)
     start_metrics_listener()
 
 
@@ -153,6 +162,18 @@ async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(EXECUTOR, ssh_relay, node, payload)
 
+def _ssh_ok(node: str) -> bool:
+    try:
+        proc = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", node, "true"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
 # =============================
 # DISPATCH LOOP
 # =============================
@@ -178,12 +199,14 @@ async def dispatch_loop():
                 if not fut.cancelled():
                     fut.set_result((node, result))
             except Exception as e:
+                NODE_HEALTHY[node] = False
                 if not fut.cancelled():
                     fut.set_exception(e)
             finally:
                 IN_FLIGHT[node] -= 1
                 JOB_QUEUE.task_done()
-                AVAILABLE_NODES.put_nowait(node)
+                if NODE_HEALTHY.get(node, True):
+                    AVAILABLE_NODES.put_nowait(node)
                 await broadcast_status()
 
         asyncio.create_task(_do())
@@ -309,31 +332,43 @@ async def start_vllm_cluster(request: Request):
     results = {}
     errors = {}
 
+    healthy_nodes = [node for node in NODE_POOL if NODE_HEALTHY.get(node, True)]
+
+    if not healthy_nodes:
+        return {"ok": False, "error": "No healthy nodes available"}
+
     tasks = {
         node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model)
-        for node in NODE_POOL
+        for node in healthy_nodes
     }
 
     completed = await asyncio.gather(*tasks.values())
 
-    all_ok = True
+    started_any = False
 
     for node, (ok, err) in zip(tasks.keys(), completed):
         results[node] = ok
         if err:
             errors[node] = err
-        if not ok:
-            all_ok = False
+        if ok:
+            started_any = True
+        else:
+            NODE_HEALTHY[node] = False
 
-    if not all_ok:
+    # mark skipped unhealthy nodes explicitly
+    for node in NODE_POOL:
+        if node not in results:
+            results[node] = False
+            errors[node] = "Skipped: node unhealthy/unreachable"
+
+    if not started_any:
         return {
             "ok": False,
-            "error": "Failed to start all nodes",
+            "error": "Failed to start on any healthy node",
             "nodes": results,
             "errors": errors,
         }
 
-    # Only set after successful startup
     CURRENT_MODEL = model
 
     return {

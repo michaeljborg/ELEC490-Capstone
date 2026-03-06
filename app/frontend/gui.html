@@ -1,818 +1,945 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Cluster Control Panel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <style>
-    :root{
-      --bg:#0b1020;
-      --panel:rgba(30,41,59,.55);
-      --border:rgba(255,255,255,.08);
-      --text:#e2e8f0;
-      --muted:#94a3b8;
+  <head>
+    <title>Cluster Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-      --bubble-user:#1f2a44;
-      --bubble-assistant:#121a2d;
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: rgba(30, 41, 59, .55);
+        --border: rgba(255, 255, 255, .08);
+        --text: #e2e8f0;
+        --muted: #94a3b8;
 
-      --accent:#00f5ff;
-      --good:#35ff7a;
-      --bad:#ff4d4d;
-      --shadow: 0 10px 30px rgba(0,0,0,.35);
-    }
+        --bubble-user: #1f2a44;
+        --bubble-assistant: #121a2d;
 
-    *{ box-sizing:border-box; }
-    body{
-      margin:0;
-      padding:32px;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-      background: radial-gradient(1200px 800px at 20% 10%, rgba(124,58,237,.18), transparent 60%),
-                  radial-gradient(900px 700px at 85% 40%, rgba(0,245,255,.12), transparent 55%),
-                  var(--bg);
-      color:var(--text);
-      display:flex;
-      gap:24px;
-      justify-content:center;
-      align-items:flex-start;
-      min-height: 100vh;
-      background-attachment: fixed;
-    }
+        --accent: #00f5ff;
+        --good: #35ff7a;
+        --bad: #ff4d4d;
+        --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      }
 
-    .sidebar{
-      width:260px;
-      background:var(--panel);
-      backdrop-filter: blur(14px);
-      border:1px solid var(--border);
-      border-radius:16px;
-      padding:22px;
-      box-shadow: var(--shadow);
-      position: sticky;
-      top: 24px;
-    }
+      * {
+        box-sizing: border-box;
+      }
 
-    .sidebar h3{
-      margin:0 0 12px 0;
-      font-size:16px;
-      letter-spacing:.2px;
-    }
+      body {
+        margin: 0;
+        padding: 32px;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        background: radial-gradient(1200px 800px at 20% 10%, rgba(124, 58, 237, .18), transparent 60%),
+          radial-gradient(900px 700px at 85% 40%, rgba(0, 245, 255, .12), transparent 55%),
+          var(--bg);
+        color: var(--text);
+        display: flex;
+        gap: 24px;
+        justify-content: center;
+        align-items: flex-start;
+        min-height: 100vh;
+        background-attachment: fixed;
+      }
 
-    .node-item{
-      padding:10px 0;
-      border-bottom:1px solid var(--border);
-      font-size:13px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:12px;
-    }
-    .node-item:last-child{ border-bottom:none; }
-    .node-pill{
-      font-size:12px;
-      padding:4px 10px;
-      border-radius:999px;
-      border:1px solid var(--border);
-      background: rgba(2,6,23,.45);
-      color: var(--muted);
-      white-space: nowrap;
-    }
+      .sidebar {
+        width: 260px;
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: var(--shadow);
+        position: sticky;
+        top: 24px;
+      }
 
-    .main{
-      width:min(900px, 100%);
-      display:flex;
-      flex-direction:column;
-      gap:16px;
-    }
+      .topbar h3 {
+        margin: 0 0 12px 0;
+        font-size: 16px;
+        letter-spacing: .2px;
+      }
 
-    .topbar{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:18px;
-      padding:18px 20px;
-      backdrop-filter: blur(14px);
-      box-shadow: var(--shadow);
-      display:flex;
-      justify-content:space-between;
-      gap:16px;
-      align-items:center;
-      flex-wrap:wrap;
-    }
+      .sidebar h3,
+      .topbar h3,
+      .monitoring-panel h3 {
+        font-size: 16px;
+        letter-spacing: .2px;
+      }
 
-    .topbar h2{
-      margin:0;
-      font-size:18px;
-      font-weight:700;
-      letter-spacing:.2px;
-    }
+      .sidebar h3,
+      .topbar h3 {
+        margin: 0 0 12px 0;
+      }
 
-    .stats{
-      display:flex;
-      gap:18px;
-      align-items:center;
-      flex-wrap:wrap;
-      font-size:13px;
-      color: var(--muted);
-    }
-    .stats .num{
-      color: var(--accent);
-      font-weight:700;
-      padding-left:6px;
-    }
+      .monitoring-panel h3 {
+        margin: 0 0 10px 0;
+      }
 
-    .controls{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      flex-wrap:wrap;
-      margin-top: 8px;
-    }
+      .node-item {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
 
-    button{
-      padding:10px 14px;
-      border-radius:10px;
-      border:1px solid rgba(148,163,184,.25);
-      background: rgba(2,6,23,.35);
-      color: var(--text);
-      font-weight:650;
-      cursor:pointer;
-      transition: transform .08s ease, background .15s ease, border-color .15s ease;
-    }
-    button:hover{
-      background: rgba(30,41,59,.5);
-      border-color: rgba(148,163,184,.45);
-    }
-    button:active{ transform: translateY(1px); }
+      .node-item:last-child {
+        border-bottom: none;
+      }
 
-    .toggle{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:13px;
-      color: var(--muted);
-      user-select:none;
-    }
-    .toggle input{ transform: translateY(1px); }
+      .node-pill{
+        font-size:12px;
+        padding:4px 10px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background: rgba(2,6,23,.45);
+        color: var(--muted);
+        white-space: nowrap;
 
-    /* Chat container */
-    .chat-card{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:18px;
-      padding:16px;
-      backdrop-filter: blur(14px);
-      box-shadow: var(--shadow);
-      display:flex;
-      flex-direction:column;
-      height: min(72vh, 720px);
-      min-height: 520px;
-    }
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
 
-    .chat-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding: 2px 6px 12px 6px;
-      border-bottom:1px solid var(--border);
-      margin-bottom:12px;
-    }
-    .chat-header .hint{
-      font-size:12px;
-      color: var(--muted);
-    }
+      .main {
+        width: min(900px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        flex: 1;                      /* allow it to expand */
+      }
 
-    .messages{
-      flex:1;
-      overflow-y:auto;
-      padding: 8px 6px;
-      scroll-behavior:smooth;
-    }
+      .topbar {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 18px 20px;
+        backdrop-filter: blur(14px);
+        box-shadow: var(--shadow);
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
 
-    .msg-row{
-      display:flex;
-      gap:10px;
-      margin: 10px 0;
-      align-items:flex-end;
-    }
-    .msg-row.user{ justify-content:flex-end; }
-    .msg-row.assistant{ justify-content:flex-start; }
+      .topbar h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: .2px;
+      }
 
-    .bubble{
-      max-width: 78%;
-      padding: 12px 14px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,.08);
-      line-height:1.35;
-      font-size: 14px;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      box-shadow: 0 6px 18px rgba(0,0,0,.18);
-    }
-    .bubble.user{
-      background: linear-gradient(180deg, rgba(124,58,237,.18), rgba(2,6,23,.15)),
-                  var(--bubble-user);
-      border-top-right-radius: 6px;
-    }
-    .bubble.assistant{
-      background: rgba(2,6,23,.25);
-      border-top-left-radius: 6px;
-    }
+      .stats {
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 13px;
+        color: var(--muted);
+      }
 
-    .meta{
-      font-size:11px;
-      color: rgba(148,163,184,.75);
-      padding: 0 2px;
-      min-width: 60px;
-    }
-    .msg-row.user .meta{ text-align:right; }
+      .stats .num {
+        color: var(--accent);
+        font-weight: 700;
+        padding-left: 6px;
+      }
 
-    .typing{
-      display:inline-flex;
-      gap:5px;
-      align-items:center;
-    }
-    .dot{
-      width:6px; height:6px; border-radius:999px;
-      background: rgba(148,163,184,.8);
-      animation: blink 1.2s infinite ease-in-out;
-    }
-    .dot:nth-child(2){ animation-delay:.15s; }
-    .dot:nth-child(3){ animation-delay:.3s; }
-    @keyframes blink{
-      0%, 80%, 100% { opacity:.25; transform: translateY(0); }
-      40% { opacity:1; transform: translateY(-2px); }
-    }
+      .controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
 
-    /* Input bar */
-    .composer{
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top:1px solid var(--border);
-      display:flex;
-      gap:10px;
-      align-items:flex-end;
-    }
-    textarea{
-      flex:1;
-      resize:none;
-      min-height: 44px;
-      max-height: 180px;
-      padding: 12px 12px;
-      border-radius: 14px;
-      border:1px solid rgba(148,163,184,.25);
-      background: rgba(2,6,23,.35);
-      color: var(--text);
-      outline:none;
-      font-size:14px;
-      line-height:1.35;
-    }
-    textarea:focus{
-      border-color: rgba(0,245,255,.35);
-      box-shadow: 0 0 0 3px rgba(0,245,255,.08);
-    }
+      button {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, .25);
+        background: rgba(2, 6, 23, .35);
+        color: var(--text);
+        font-weight: 650;
+        cursor: pointer;
+        transition: transform .08s ease, background .15s ease, border-color .15s ease;
+      }
 
-    .send{
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(0,245,255,.25);
-      background: rgba(0,245,255,.08);
-      font-weight: 750;
-    }
-    .send:hover{
-      background: rgba(0,245,255,.12);
-      border-color: rgba(0,245,255,.4);
-    }
+      button:hover {
+        background: rgba(30, 41, 59, .5);
+        border-color: rgba(148, 163, 184, .45);
+      }
 
-    /* Monitoring panel (kept similar) */
-    .monitoring-panel{
-      width: 380px;
-      background: var(--panel);
-      backdrop-filter: blur(14px);
-      border-radius: 18px;
-      padding: 22px;
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      position: sticky;
-      top: 24px;
-      height: fit-content;
-    }
-    .monitoring-controls{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      margin-bottom: 12px;
-      flex-wrap:wrap;
-    }
-    .monitoring-status{
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .metrics-grid{
-      display:grid;
-      gap:12px;
-      grid-template-columns: 1fr;
-    }
-    .metric-card{
-      background: rgba(2,6,23,.35);
-      border:1px solid var(--border);
-      border-radius: 14px;
-      padding: 14px;
-    }
-    .metric-card h4{
-      margin:0 0 10px 0;
-      color: var(--accent);
-      font-size: 13px;
-      letter-spacing:.2px;
-    }
-    .metric-card .row{
-      display:flex;
-      justify-content:space-between;
-      margin-bottom: 6px;
-      font-size: 13px;
-    }
-    .label{ color: var(--muted); }
-    .value{ color: var(--text); font-weight: 700; }
+      button:active {
+        transform: translateY(1px);
+      }
+
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--muted);
+        user-select: none;
+      }
+
+      .toggle input {
+        transform: translateY(1px);
+      }
+
+      /* Chat container */
+      .chat-card{
+        background:var(--panel);
+        border:1px solid var(--border);
+        border-radius:18px;
+        padding:16px;
+        backdrop-filter: blur(14px);
+        box-shadow: var(--shadow);
+        display:flex;
+        flex-direction:column;
+
+        height: calc(100vh - 64px);   /* fill most of the viewport */
+        max-height: none;
+        min-height: 640px;            /* optional safety */
+      }
+
+      .chat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 2px 6px 12px 6px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+
+      .chat-header .hint {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 6px;
+        scroll-behavior: smooth;
+      }
+
+      .msg-row {
+        display: flex;
+        gap: 10px;
+        margin: 10px 0;
+        align-items: flex-end;
+      }
+
+      .msg-row.user {
+        justify-content: flex-end;
+      }
+
+      .msg-row.assistant {
+        justify-content: flex-start;
+      }
+
+      .bubble {
+        max-width: 78%;
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, .08);
+        line-height: 1.35;
+        font-size: 14px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+      }
+
+      .bubble.user {
+        background: linear-gradient(180deg, rgba(124, 58, 237, .18), rgba(2, 6, 23, .15)),
+          var(--bubble-user);
+        border-top-right-radius: 6px;
+      }
+
+      .bubble.assistant {
+        background: rgba(2, 6, 23, .25);
+        border-top-left-radius: 6px;
+      }
+
+      .meta {
+        font-size: 11px;
+        color: rgba(148, 163, 184, .75);
+        padding: 0 2px;
+        min-width: 60px;
+      }
+
+      .msg-row.user .meta {
+        text-align: right;
+      }
+
+      .typing {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, .8);
+        animation: blink 1.2s infinite ease-in-out;
+      }
+
+      .dot:nth-child(2) {
+        animation-delay: .15s;
+      }
+
+      .dot:nth-child(3) {
+        animation-delay: .3s;
+      }
+
+      @keyframes blink {
+
+        0%,
+        80%,
+        100% {
+          opacity: .25;
+          transform: translateY(0);
+        }
+
+        40% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
+      }
+
+      /* Input bar */
+      .composer {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+
+      textarea {
+        flex: 1;
+        resize: none;
+        min-height: 44px;
+        max-height: 180px;
+        padding: 12px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(148, 163, 184, .25);
+        background: rgba(2, 6, 23, .35);
+        color: var(--text);
+        outline: none;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      textarea:focus {
+        border-color: rgba(0, 245, 255, .35);
+        box-shadow: 0 0 0 3px rgba(0, 245, 255, .08);
+      }
+
+      .send {
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(0, 245, 255, .25);
+        background: rgba(0, 245, 255, .08);
+        font-weight: 750;
+      }
+
+      .send:hover {
+        background: rgba(0, 245, 255, .12);
+        border-color: rgba(0, 245, 255, .4);
+      }
+
+      /* Monitoring panel (kept similar) */
+      .monitoring-panel {
+        width: 380px;
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+        border-radius: 18px;
+        padding: 22px;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        position: sticky;
+        top: 24px;
+        height: fit-content;
+      }
+
+      .monitoring-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+
+      .monitoring-status {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .metrics-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr;
+      }
+
+      .metric-card {
+        background: rgba(2, 6, 23, .35);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .metric-card h4 {
+        margin: 0 0 10px 0;
+        color: var(--accent);
+        font-size: 13px;
+        letter-spacing: .2px;
+      }
+
+      .metric-card .row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        font-size: 13px;
+      }
+
+      .label {
+        color: var(--muted);
+      }
+
+      .value {
+        color: var(--text);
+        font-weight: 700;
+      }
+
+      .leftcol {
+        width: 260px;
+        /* adjust if you want */
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        position: sticky;
+        top: 24px;
+      }
+
+      /* sidebar is no longer the sticky element */
+      .sidebar {
+        position: static;
+        top: auto;
+      }
+
+      /* make the topbar behave like a normal card in the left column */
+      .topbar {
+        width: 100%;
+        padding: 18px 20px;
+      }
     </style>
 
-  <script>
-    const NODE_POOL = {{ node_pool_json | safe }};
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+    <script>
+      const NODE_POOL = {{ node_pool_json | safe }};
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
-    let metricsPollTimer = null;
+      let metricsPollTimer = null;
 
-    /* ===== CHAT HISTORY STATE ===== */
-    let chatHistory = [];
+      /* ===== CHAT HISTORY STATE ===== */
+      let chatHistory = [];
 
-    const nodeVllmState = Object.fromEntries(NODE_POOL.map(n => [n, "online"]));
+      const nodeVllmState = Object.fromEntries(NODE_POOL.map(n => [n, "online"]));
 
-    ws.onmessage = (event) => {
-      const status = JSON.parse(event.data);
+      ws.onmessage = (event) => {
+        const status = JSON.parse(event.data);
 
-      NODE_POOL.forEach(node => {
-        const el = document.getElementById("status-" + node);
-        if (!el) return;
+        NODE_POOL.forEach(node => {
+          const el = document.getElementById("status-" + node);
+          if (!el) return;
 
-        const mode = nodeVllmState[node] || "online";
-        if (mode === "offline" || mode === "starting") {
+          const mode = nodeVllmState[node] || "online";
+          if (mode === "offline" || mode === "starting") {
             setNodeStatus(node, mode);
             return;
-        }
+          }
 
-        const inUse = status.in_flight && status.in_flight[node] > 0;
-        el.innerText = inUse ? "In Use" : "Free";
-        el.style.color = inUse ? "var(--bad)" : "var(--good)";
-        el.style.borderColor = inUse ? "rgba(255,77,77,.35)" : "rgba(53,255,122,.35)";
+          const inUse = status.in_flight && status.in_flight[node] > 0;
+          el.innerText = inUse ? "In Use" : "Free";
+          el.style.color = inUse ? "var(--bad)" : "var(--good)";
+          el.style.borderColor = inUse ? "rgba(255,77,77,.35)" : "rgba(53,255,122,.35)";
         });
 
-      const q = document.getElementById("queue-depth");
-      if (q) q.innerText = status.queue_depth ?? 0;
+        const q = document.getElementById("queue-depth");
+        if (q) q.innerText = status.queue_depth ?? 0;
 
-      const u = document.getElementById("user-count");
-      if (u) u.innerText = status.total_users ?? 0;
-    };
+        const u = document.getElementById("user-count");
+        if (u) u.innerText = status.total_users ?? 0;
+      };
 
-    function nowTime(){
-      return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    }
-
-    function scrollMessagesToBottom(){
-      const box = document.getElementById("messages");
-      box.scrollTop = box.scrollHeight;
-    }
-
-    // Basic "markdown-ish" rendering: code blocks + inline code + line breaks.
-    // (Safe-ish because we escape HTML first.)
-    function renderText(text){
-      const escape = (s) => s
-        .replaceAll("&","&amp;")
-        .replaceAll("<","&lt;")
-        .replaceAll(">","&gt;");
-
-      let t = escape(text);
-
-      // ```code``` blocks
-      t = t.replace(/```([\s\S]*?)```/g, (m, code) => {
-        return `<pre style="margin:10px 0; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.55); overflow:auto;"><code>${code}</code></pre>`;
-      });
-
-      // inline `code`
-      t = t.replace(/`([^`]+)`/g, `<code style="padding:2px 6px; border-radius:8px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.45);">$1</code>`);
-
-      // line breaks
-      t = t.replaceAll("\n","<br/>");
-      return t;
-    }
-
-    function addMessage(role, content, metaLabel=""){
-      const messages = document.getElementById("messages");
-
-      const row = document.createElement("div");
-      row.className = `msg-row ${role}`;
-
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = metaLabel || nowTime();
-
-      const bubble = document.createElement("div");
-      bubble.className = `bubble ${role}`;
-      bubble.innerHTML = renderText(content);
-
-      if (role === "user"){
-        row.appendChild(meta);
-        row.appendChild(bubble);
-      } else {
-        row.appendChild(bubble);
-        row.appendChild(meta);
+      function nowTime() {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
 
-      messages.appendChild(row);
-      scrollMessagesToBottom();
-      return row;
-    }
-
-    function addTypingBubble(){
-      const messages = document.getElementById("messages");
-      const row = document.createElement("div");
-      row.className = "msg-row assistant";
-      row.id = "typing-row";
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble assistant";
-      bubble.innerHTML = `<span class="typing">
-        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      </span>`;
-
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = nowTime();
-
-      row.appendChild(bubble);
-      row.appendChild(meta);
-      messages.appendChild(row);
-      scrollMessagesToBottom();
-      return row;
-    }
-
-    function removeTypingBubble(){
-      const el = document.getElementById("typing-row");
-      if (el) el.remove();
-    }
-
-    function autoGrowTextarea(el){
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 180) + "px";
-    }
-
-    /* ===== UPDATED sendQuery (History Aware) ===== */
-    async function sendQuery(){
-      const input = document.getElementById("userPrompt");
-      const prompt = input.value.trim();
-      if (!prompt) return;
-
-      const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
-      const historyEnabled = document.getElementById("enableHistory").checked;
-
-      // Render user's message bubble
-      addMessage("user", prompt);
-
-      let payload;
-      if (historyEnabled){
-        chatHistory.push({ role: "user", content: prompt });
-        payload = { messages: chatHistory, job_id };
-      } else {
-        payload = { prompt, job_id };
+      function scrollMessagesToBottom() {
+        const box = document.getElementById("messages");
+        box.scrollTop = box.scrollHeight;
       }
 
-      input.value = "";
-      autoGrowTextarea(input);
+      // Basic "markdown-ish" rendering: code blocks + inline code + line breaks.
+      // (Safe-ish because we escape HTML first.)
+      function renderText(text) {
+        const escape = (s) => s
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
 
-      // show typing while waiting
-      addTypingBubble();
+        let t = escape(text);
 
-      // enqueue
-      const enq = await fetch("/enqueue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+        // ```code``` blocks
+        t = t.replace(/```([\s\S]*?)```/g, (m, code) => {
+          return `<pre style="margin:10px 0; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.55); overflow:auto;"><code>${code}</code></pre>`;
+        });
 
-      const enqData = await enq.json();
-      if (!enqData.ok){
-        removeTypingBubble();
-        addMessage("assistant", "ERROR: " + enqData.error, "error");
-        if (historyEnabled) chatHistory.pop();
-        return;
+        // inline `code`
+        t = t.replace(/`([^`]+)`/g, `<code style="padding:2px 6px; border-radius:8px; border:1px solid rgba(255,255,255,.08); background:rgba(2,6,23,.45);">$1</code>`);
+
+        // line breaks
+        t = t.replaceAll("\n", "<br/>");
+        return t;
       }
 
-      // you can optionally show a small system-ish assistant message about queue
-      // (comment out if you want it silent)
-      removeTypingBubble();
-      addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
+      function addMessage(role, content, metaLabel = "") {
+        const messages = document.getElementById("messages");
 
-      // wait for completion
-      const typing2 = addTypingBubble();
-      const res = await fetch("/wait/" + encodeURIComponent(job_id));
-      const data = await res.json();
-      removeTypingBubble();
+        const row = document.createElement("div");
+        row.className = `msg-row ${role}`;
 
-      if (data.ok){
-        // Render assistant response
-        addMessage("assistant", data.line, data.node);
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = metaLabel || nowTime();
 
-        if (historyEnabled){
-          chatHistory.push({ role: "assistant", content: data.line });
-        }
-      } else {
-        addMessage("assistant", "ERROR: " + data.error, "error");
-        if (historyEnabled) chatHistory.pop();
-      }
-    }
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${role}`;
+        bubble.innerHTML = renderText(content);
 
-    async function spam50(){
-      addMessage("assistant", "Enqueuing 50 prompts…", "system");
-      const res = await fetch("/spam50", { method: "POST" });
-      const info = await res.json();
-      if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
-
-      for (const job_id of info.job_ids){
-        const typing = addTypingBubble();
-        const r = await fetch("/wait/" + encodeURIComponent(job_id));
-        const data = await r.json();
-        removeTypingBubble();
-
-        if (data.ok){
-          addMessage("assistant", data.line, data.node);
+        if (role === "user") {
+          row.appendChild(meta);
+          row.appendChild(bubble);
         } else {
-          addMessage("assistant", "ERROR: " + data.error, "error");
+          row.appendChild(bubble);
+          row.appendChild(meta);
         }
+
+        messages.appendChild(row);
+        scrollMessagesToBottom();
+        return row;
       }
-    }
 
-    /* ===== START/STOP VLLM ===== */
-    async function startVLLMCluster(){
-      addMessage("assistant", "Starting vLLM on worker nodes…", "system");
-      for (const node of NODE_POOL) {
-        nodeVllmState[node] = "starting";
-        setNodeStatus(node, "starting");
+      function addTypingBubble() {
+        const messages = document.getElementById("messages");
+        const row = document.createElement("div");
+        row.className = "msg-row assistant";
+        row.id = "typing-row";
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble assistant";
+        bubble.innerHTML = `<span class="typing">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </span>`;
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = nowTime();
+
+        row.appendChild(bubble);
+        row.appendChild(meta);
+        messages.appendChild(row);
+        scrollMessagesToBottom();
+        return row;
+      }
+
+      function removeTypingBubble() {
+        const el = document.getElementById("typing-row");
+        if (el) el.remove();
+      }
+
+      function autoGrowTextarea(el) {
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, 180) + "px";
+      }
+
+      /* ===== UPDATED sendQuery (History Aware) ===== */
+      async function sendQuery() {
+        const input = document.getElementById("userPrompt");
+        const prompt = input.value.trim();
+        if (!prompt) return;
+
+        const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+        const historyEnabled = document.getElementById("enableHistory").checked;
+
+        // Render user's message bubble
+        addMessage("user", prompt);
+
+        let payload;
+        if (historyEnabled) {
+          chatHistory.push({ role: "user", content: prompt });
+          payload = { messages: chatHistory, job_id };
+        } else {
+          payload = { prompt, job_id };
         }
-      try{
-        const model = document.getElementById("model-select").value;
 
-        if (!model){
-          addMessage("assistant", "Please select a model first.", "error");
+        input.value = "";
+        autoGrowTextarea(input);
+
+        // show typing while waiting
+        addTypingBubble();
+
+        // enqueue
+        const enq = await fetch("/enqueue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const enqData = await enq.json();
+        if (!enqData.ok) {
+          removeTypingBubble();
+          addMessage("assistant", "ERROR: " + enqData.error, "error");
+          if (historyEnabled) chatHistory.pop();
           return;
         }
 
-        document.getElementById("model-select").disabled = true;
+        // you can optionally show a small system-ish assistant message about queue
+        // (comment out if you want it silent)
+        removeTypingBubble();
+        addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
 
-        const res = await fetch('/api/vllm/start', {
-          method:'POST',
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model })
-        });
+        // wait for completion
+        const typing2 = addTypingBubble();
+        const res = await fetch("/wait/" + encodeURIComponent(job_id));
         const data = await res.json();
+        removeTypingBubble();
 
-        for (const node in data.nodes) {
-            if (data.nodes[node]) {
-                nodeVllmState[node] = "online";
+        if (data.ok) {
+          // Render assistant response
+          addMessage("assistant", data.line, data.node);
 
-                // Immediately render as Free (no in-flight jobs yet)
-                const el = document.getElementById("status-" + node);
-                if (el) {
-                    el.innerText = "Free";
-                    el.style.color = "var(--good)";
-                    el.style.borderColor = "rgba(53,255,122,.35)";
-                }
-
-                addMessage("assistant", "✔ " + node + " started.", "system");
-                
-            } else {
-                nodeVllmState[node] = "offline";
-                setNodeStatus(node, "offline");
-                addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
-            }
-}
-        if (data.ok && data.model){
-          document.getElementById("active-model-display").innerText =
-            "Active Model: " + data.model;
-
-          addMessage("assistant", "Active model: " + data.model, "system");
+          if (historyEnabled) {
+            chatHistory.push({ role: "assistant", content: data.line });
+          }
+        } else {
+          addMessage("assistant", "ERROR: " + data.error, "error");
+          if (historyEnabled) chatHistory.pop();
         }
-      }catch(e){
-        addMessage("assistant", "ERROR: " + e.message, "error");
       }
-    }
 
-    async function stopVLLMCluster(){
-      addMessage("assistant", "Stopping vLLM on worker nodes…", "system");
-      try{
-        const res = await fetch('/api/vllm/stop', { method:'POST' });
-        const data = await res.json();
+      async function spam50() {
+        addMessage("assistant", "Enqueuing 50 prompts…", "system");
+        const res = await fetch("/spam50", { method: "POST" });
+        const info = await res.json();
+        if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
 
-        for (const node in data.nodes){
-          if (data.nodes[node]) {
-            nodeVllmState[node] = "offline";
-            setNodeStatus(node, "offline");
-            addMessage("assistant", "✔ " + node + " stopped.", "system");
+        for (const job_id of info.job_ids) {
+          const typing = addTypingBubble();
+          const r = await fetch("/wait/" + encodeURIComponent(job_id));
+          const data = await r.json();
+          removeTypingBubble();
+
+          if (data.ok) {
+            addMessage("assistant", data.line, data.node);
           } else {
-            addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
+            addMessage("assistant", "ERROR: " + data.error, "error");
           }
         }
-        document.getElementById("model-select").disabled = false;
-        document.getElementById("active-model-display").innerText = "No model loaded";
-        addMessage("assistant", "Cluster shutdown complete.", "system");
-      }catch(e){
-        addMessage("assistant", "ERROR: " + e.message, "error");
       }
-    }
 
-    function setNodeStatus(node, mode) {
+      /* ===== START/STOP VLLM ===== */
+      async function startVLLMCluster() {
+        addMessage("assistant", "Starting vLLM on worker nodes…", "system");
+        for (const node of NODE_POOL) {
+          nodeVllmState[node] = "starting";
+          setNodeStatus(node, "starting");
+        }
+        try {
+          const model = document.getElementById("model-select").value;
+
+          if (!model) {
+            addMessage("assistant", "Please select a model first.", "error");
+            return;
+          }
+
+          document.getElementById("model-select").disabled = true;
+
+          const res = await fetch('/api/vllm/start', {
+            method: 'POST',
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model })
+          });
+          const data = await res.json();
+
+          for (const node in data.nodes) {
+            if (data.nodes[node]) {
+              nodeVllmState[node] = "online";
+
+              // Immediately render as Free (no in-flight jobs yet)
+              const el = document.getElementById("status-" + node);
+              if (el) {
+                el.innerText = "Free";
+                el.style.color = "var(--good)";
+                el.style.borderColor = "rgba(53,255,122,.35)";
+              }
+
+              addMessage("assistant", "✔ " + node + " started.", "system");
+
+            } else {
+              nodeVllmState[node] = "offline";
+              setNodeStatus(node, "offline");
+              addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
+            }
+          }
+          if (data.ok && data.model) {
+            document.getElementById("active-model-display").innerText =
+              "Active Model: " + data.model;
+
+            addMessage("assistant", "Active model: " + data.model, "system");
+          }
+        } catch (e) {
+          addMessage("assistant", "ERROR: " + e.message, "error");
+        }
+      }
+
+      async function stopVLLMCluster() {
+        addMessage("assistant", "Stopping vLLM on worker nodes…", "system");
+        try {
+          const res = await fetch('/api/vllm/stop', { method: 'POST' });
+          const data = await res.json();
+
+          for (const node in data.nodes) {
+            if (data.nodes[node]) {
+              nodeVllmState[node] = "offline";
+              setNodeStatus(node, "offline");
+              addMessage("assistant", "✔ " + node + " stopped.", "system");
+            } else {
+              addMessage("assistant", "✖ " + node + " failed: " + (data.errors[node] || "Unknown error"), "error");
+            }
+          }
+          document.getElementById("model-select").disabled = false;
+          document.getElementById("active-model-display").innerText = "No model loaded";
+          addMessage("assistant", "Cluster shutdown complete.", "system");
+        } catch (e) {
+          addMessage("assistant", "ERROR: " + e.message, "error");
+        }
+      }
+
+      function setNodeStatus(node, mode) {
         const el = document.getElementById("status-" + node);
         if (!el) return;
 
         // mode: "offline" | "starting" | "online"
         if (mode === "offline") {
-            el.innerText = "Offline";
-            el.style.color = "#680C07";
-            el.style.borderColor = "rgba(66,12,9,.55)";
-            return;
+          el.innerText = "Offline";
+          el.style.color = "#680C07";
+          el.style.borderColor = "rgba(66,12,9,.55)";
+          return;
         }
 
         if (mode === "starting") {
-            el.innerText = "Startup";
-            el.style.color = "orange";
-            el.style.borderColor = "rgba(255,165,0,.45)";
-            return;
+          el.innerText = "Startup";
+          el.style.color = "orange";
+          el.style.borderColor = "rgba(255,165,0,.45)";
+          return;
         }
 
         // online: show Free/In Use using in-flight info (color set by ws handler below)
         // actual text/color is handled in ws.onmessage, so do nothing here
-        }
+      }
 
-    async function syncClusterState() {
-      try {
-        const res = await fetch("/api/vllm/status");
-        const data = await res.json();
+      async function syncClusterState() {
+        try {
+          const res = await fetch("/api/vllm/status");
+          const data = await res.json();
 
-        let anyOnline = false;
+          let anyOnline = false;
 
-        for (const node of NODE_POOL) {
-          if (data.nodes[node]) {
-            nodeVllmState[node] = "online";
-            anyOnline = true;
-          } else {
-            nodeVllmState[node] = "offline";
-            setNodeStatus(node, "offline");
+          for (const node of NODE_POOL) {
+            if (data.nodes[node]) {
+              nodeVllmState[node] = "online";
+              anyOnline = true;
+            } else {
+              nodeVllmState[node] = "offline";
+              setNodeStatus(node, "offline");
+            }
           }
-        }
 
-        if (anyOnline) {
-          document.getElementById("active-model-display").innerText =
-            "Active Model: Running";
-        } else {
-          document.getElementById("active-model-display").innerText =
-            "No model loaded";
-        }
+          if (anyOnline) {
+            document.getElementById("active-model-display").innerText =
+              "Active Model: Running";
+          } else {
+            document.getElementById("active-model-display").innerText =
+              "No model loaded";
+          }
 
-      } catch (err) {
-        console.error("Failed to sync cluster state:", err);
+        } catch (err) {
+          console.error("Failed to sync cluster state:", err);
+        }
       }
-    }
-    /* ===== MONITORING (unchanged but styled) ===== */
-    function initMonitoringPanel(){
-      refreshMetrics();
-      if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
-    }
-
-    async function startMonitoring(){
-      const res = await fetch('/api/monitoring/start', { method:'POST' });
-      const data = await res.json();
-      document.getElementById('monitoring-status-text').innerText =
-        data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
-      refreshMetrics();
-    }
-
-    async function stopMonitoring(){
-      const res = await fetch('/api/monitoring/stop', { method:'POST' });
-      await res.json();
-      document.getElementById('monitoring-status-text').innerText = 'Stopped';
-      refreshMetrics();
-    }
-
-    async function refreshMetrics(){
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
-      const container = document.getElementById('metrics-container');
-      if (!container) return;
-
-      let html = '';
-      for (const node of NODE_POOL){
-        const info = data.by_node[node];
-        const latest = info && info.latest ? info.latest : null;
-
-        html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
-        if (!latest){
-          html += '<div class="row"><span class="label">No data</span></div>';
-        } else {
-          html += '<div class="row"><span class="label">CPU</span><span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
-          html += '<div class="row"><span class="label">RAM</span><span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
-          html += '<div class="row"><span class="label">GPU</span><span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
-        }
-        html += '</div>';
+      /* ===== MONITORING (unchanged but styled) ===== */
+      function initMonitoringPanel() {
+        refreshMetrics();
+        if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
       }
-      container.innerHTML = html;
-    }
 
-    document.addEventListener('DOMContentLoaded', async () => {
-      initMonitoringPanel();
-      
-      await syncClusterState();
+      async function startMonitoring() {
+        const res = await fetch('/api/monitoring/start', { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('monitoring-status-text').innerText =
+          data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
+        refreshMetrics();
+      }
 
-      // textarea autosize + enter-to-send (shift+enter for newline)
-      const ta = document.getElementById("userPrompt");
-      ta.addEventListener("input", () => autoGrowTextarea(ta));
-      ta.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey){
+      async function stopMonitoring() {
+        const res = await fetch('/api/monitoring/stop', { method: 'POST' });
+        await res.json();
+        document.getElementById('monitoring-status-text').innerText = 'Stopped';
+        refreshMetrics();
+      }
+
+      async function refreshMetrics() {
+        const res = await fetch('/api/metrics');
+        const data = await res.json();
+        const container = document.getElementById('metrics-container');
+        if (!container) return;
+
+        let html = '';
+        for (const node of NODE_POOL) {
+          const info = data.by_node[node];
+          const latest = info && info.latest ? info.latest : null;
+
+          html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+          if (!latest) {
+            html += '<div class="row"><span class="label">No data</span></div>';
+          } else {
+            html += '<div class="row"><span class="label">CPU</span><span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
+            html += '<div class="row"><span class="label">RAM</span><span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
+            html += '<div class="row"><span class="label">GPU</span><span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
+          }
+          html += '</div>';
+        }
+        container.innerHTML = html;
+      }
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        initMonitoringPanel();
+
+        await syncClusterState();
+
+        // textarea autosize + enter-to-send (shift+enter for newline)
+        const ta = document.getElementById("userPrompt");
+        ta.addEventListener("input", () => autoGrowTextarea(ta));
+        ta.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             sendQuery();
-        }
+          }
+        });
+
+        // Optional: greet
+        addMessage("assistant", "Ready. Send a prompt to the cluster.", "system");
       });
+    </script>
+  </head>
 
-      // Optional: greet
-      addMessage("assistant", "Ready. Send a prompt to the cluster.", "system");
-    });
-  </script>
-</head>
+  <body>
+    <div class="leftcol">
+      <div class="sidebar">
+        <h3 style="margin:0;">Cluster Status</h3>
 
-<body>
-  <div class="sidebar">
-    <h3>Cluster Status</h3>
-    {% for node in node_pool %}
-    <div class="node-item">
-      <strong>{{ node.upper() }}:</strong>
-      <span id="status-{{ node }}" class="node-pill">Free</span>
-    </div>
-    {% endfor %}
-  </div>
-
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <h2>Cluster Control Panel</h2>
-        <div class="controls">
-          <label class="toggle">
-            <input type="checkbox" id="enableHistory">
-            Enable Chat History
-          </label>
-          
-          <select id="model-select">
-          <option value="">Select Model</option>
-            <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
-            <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
-          </select>
-
-          <button onclick="startVLLMCluster()">Start vLLM</button>
-          <button onclick="stopVLLMCluster()">Stop vLLM</button>
-          <button onclick="spam50()">Spam 50</button>
+        {% for node in node_pool %}
+        <div class="node-item">
+          <strong>{{ node.upper() }}:</strong>
+          <span id="status-{{ node }}" class="node-pill">Free</span>
         </div>
-        <div id="active-model-display" style="
-          font-size:12px;
-          color: var(--accent);
-          font-weight:700;
-          margin-top:6px;
-        ">
-          No model loaded
+        {% endfor %}
+
+        <div class="stats sidebar-stats">
+          <div class="node-item">
+            <strong>Users:</strong>
+            <span class="node-pill">
+              <span id="user-count" class="num">0</span>
+            </span>
+          </div>
+
+          <div class="node-item">
+            <strong>Queue:</strong>
+            <span class="node-pill">
+              <span id="queue-depth" class="num">0</span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="topbar">
+        <div>
+          <h3>Cluster Control Panel</h3>
+          <div class="controls">
+            <label class="toggle">
+              <input type="checkbox" id="enableHistory">
+              Enable Chat History
+            </label>
+
+            <select id="model-select">
+              <option value="">Select Model</option>
+              <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
+              <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
+            </select>
+
+            <button onclick="startVLLMCluster()">Start vLLM</button>
+            <button onclick="stopVLLMCluster()">Stop vLLM</button>
+            <button onclick="spam50()">Spam 50</button>
+          </div>
+
+          <div id="active-model-display" style="
+            font-size:12px;
+            color: var(--accent);
+            font-weight:700;
+            margin-top:6px;
+          ">
+            No model loaded
+          </div>
+        </div>
+
+        
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="chat-card">
+        <div class="chat-header">
+            <h3 style="margin:0;">Cluster Chat</h3>
+        </div>
+
+        <div id="messages" class="messages"></div>
+
+        <div class="composer">
+          <textarea id="userPrompt" placeholder="Message the cluster…"></textarea>
+          <button class="send" onclick="sendQuery()">Send</button>
         </div>
       </div>
-
-      <div class="stats">
-        <div>Queue Depth:<span id="queue-depth" class="num">0</span></div>
-        <div>Connected Users:<span id="user-count" class="num">0</span></div>
-      </div>
     </div>
 
-    <div class="chat-card">
-      <div class="chat-header">
-        <div class="hint">Shift+Enter = newline • Enter = send</div>
-        <div class="hint">Responses are tagged with node id</div>
+    <div class="monitoring-panel">
+      <h3>Cluster Monitoring</h3>
+      <div class="monitoring-controls">
+        <button onclick="startMonitoring()">Start</button>
+        <button onclick="stopMonitoring()">Stop</button>
+        <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
       </div>
-
-      <div id="messages" class="messages"></div>
-
-      <div class="composer">
-        <textarea id="userPrompt" placeholder="Message the cluster…"></textarea>
-        <button class="send" onclick="sendQuery()">Send</button>
-      </div>
+      <div id="metrics-container" class="metrics-grid"></div>
     </div>
-  </div>
+  </body>
 
-  <div class="monitoring-panel">
-    <h3 style="margin:0 0 10px 0;">Cluster Monitoring</h3>
-    <div class="monitoring-controls">
-      <button onclick="startMonitoring()">Start</button>
-      <button onclick="stopMonitoring()">Stop</button>
-      <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
-    </div>
-    <div id="metrics-container" class="metrics-grid"></div>
-  </div>
-</body>
 </html>
