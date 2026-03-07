@@ -2,7 +2,7 @@ import subprocess
 
 # Configuration
 NODES = ["node2", "node3", "node4", "node5"]
-BRANCH = "main"
+BRANCH = "cahal_streaming"
 PROJECT_PATH = "/home/cluster/ELEC490-Capstone"
 
 def sync_node(node):
