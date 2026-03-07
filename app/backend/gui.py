@@ -35,6 +35,8 @@ DISPATCHER_TASK: asyncio.Task | None = None
 
 NODE_HEALTHY = {node: True for node in NODE_POOL}
 
+# Per-job websocket registry for streaming
+JOB_SOCKETS: dict[str, WebSocket] = {}
 
 # =============================
 # STATUS BROADCAST
@@ -58,6 +60,16 @@ async def broadcast_status():
         except:
             ACTIVE_SESSIONS.discard(ws)
 
+
+async def send_job_event(job_id: str, payload: dict):
+    ws = JOB_SOCKETS.get(job_id)
+    if not ws:
+        return
+
+    try:
+        await ws.send_json(payload)
+    except Exception:
+        JOB_SOCKETS.pop(job_id, None)
 
 # =============================
 # STARTUP
@@ -116,6 +128,18 @@ async def websocket_status(websocket: WebSocket):
         ACTIVE_SESSIONS.discard(websocket)
         await broadcast_status()
 
+@app.websocket("/ws/job/{job_id}")
+async def websocket_job(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    JOB_SOCKETS[job_id] = websocket
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        JOB_SOCKETS.pop(job_id, None)
 
 # =============================
 # SSH RELAY
@@ -147,6 +171,81 @@ def http_relay(node: str, payload) -> str:
 async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(EXECUTOR, http_relay, node, payload)
+
+def http_stream_relay(node: str, payload, on_event) -> str:
+    """
+    Calls vLLM streaming endpoint directly and forwards each token chunk
+    to on_event({...}) while also reconstructing the final full text.
+    """
+    ip = node_interface_ip.NODES[node]
+    url = f"http://{ip}:8000/v1/chat/completions"
+
+    if isinstance(payload, list):
+        messages = payload
+    else:
+        messages = [{"role": "user", "content": payload}]
+
+    data = {
+        "model": CURRENT_MODEL,
+        "messages": messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
+        "stream": True,
+    }
+
+    full_text_parts = []
+
+    with requests.post(url, json=data, stream=True, timeout=120) as r:
+        r.raise_for_status()
+
+        for raw_line in r.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+
+            line = raw_line.strip()
+
+            if not line.startswith("data:"):
+                continue
+
+            data_str = line[len("data:"):].strip()
+
+            if data_str == "[DONE]":
+                on_event({"type": "done"})
+                return "".join(full_text_parts)
+
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta", {})
+            text = delta.get("content")
+
+            if text:
+                full_text_parts.append(text)
+                on_event({
+                    "type": "chunk",
+                    "text": text,
+                })
+
+    on_event({"type": "done"})
+    return "".join(full_text_parts)
+
+
+async def run_stream_on_node(job_id: str, node: str, payload) -> str:
+    loop = asyncio.get_running_loop()
+
+    def worker():
+        def emit(event: dict):
+            asyncio.run_coroutine_threadsafe(send_job_event(job_id, event), loop)
+
+        return http_stream_relay(node, payload, emit)
+
+    return await loop.run_in_executor(EXECUTOR, worker)
 
 def _ssh_ok(node: str) -> bool:
     try:
@@ -198,13 +297,45 @@ async def dispatch_loop():
 
             async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
                 try:
-                    result = await run_on_node(node, payload)
+                    await send_job_event(job_id, {"type": "start", "node": node})
+
+                    # Stream only if this job has an attached websocket
+                    if job_id in JOB_SOCKETS:
+                        result = await run_stream_on_node(job_id, node, payload)
+                    else:
+                        result = await run_on_node(node, payload)
+
+                    await send_job_event(job_id, {"type": "done", "node": node})
+
                     if not fut.cancelled():
                         fut.set_result((node, result))
+
                 except Exception as e:
-                    NODE_HEALTHY[node] = False
+                    err_text = str(e)
+
+                    # Only quarantine on likely transport/node failure
+                    if any(x in err_text.lower() for x in [
+                        "ssh",
+                        "connection refused",
+                        "connection reset",
+                        "timed out",
+                        "timeout",
+                        "no route to host",
+                        "host unreachable",
+                        "network is unreachable",
+                        "could not resolve hostname",
+                    ]):
+                        NODE_HEALTHY[node] = False
+
+                    await send_job_event(job_id, {
+                        "type": "error",
+                        "node": node,
+                        "error": err_text,
+                    })
+
                     if not fut.cancelled():
                         fut.set_exception(e)
+
                 finally:
                     IN_FLIGHT[node] -= 1
                     JOB_QUEUE.task_done()
@@ -464,22 +595,19 @@ async def shutdown_event():
 async def spam50():
     loop = asyncio.get_running_loop()
 
-    job_ids = []
+    prompts = []
     ahead_before = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
 
     for i, p in enumerate(SPAM_PROMPTS_50, start=1):
-        fut = loop.create_future()
         job_id = f"spam-{i}-{int(loop.time()*1000)}"
-
-        PENDING[job_id] = fut
-        await JOB_QUEUE.put((job_id, p, fut))
-        job_ids.append(job_id)
-
-    await broadcast_status()
+        prompts.append({
+            "job_id": job_id,
+            "prompt": p,
+        })
 
     return {
         "ok": True,
         "enqueued": 50,
         "ahead_before": ahead_before,
-        "job_ids": job_ids,
+        "jobs": prompts,
     }

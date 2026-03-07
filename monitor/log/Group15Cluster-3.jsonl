@@ -2264,3 +2264,11 @@
 {"node_name": "Group15Cluster-3", "timestamp": 1772437205.1929138, "cpu_percent": 0.3, "ram_percent": 22.9, "net_bytes_sent": 1421449182, "net_bytes_recv": 22354003287, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7687.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 38.0, "gpu_power_watts": 15.44}
 {"node_name": "Group15Cluster-3", "timestamp": 1772437206.2220228, "cpu_percent": 0.4, "ram_percent": 22.9, "net_bytes_sent": 1421450023, "net_bytes_recv": 22354003742, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7687.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 38.0, "gpu_power_watts": 14.56}
 {"node_name": "Group15Cluster-3", "timestamp": 1772437207.2519314, "cpu_percent": 0.4, "ram_percent": 23.0, "net_bytes_sent": 1421450864, "net_bytes_recv": 22354004197, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7687.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 38.0, "gpu_power_watts": 14.48}
+{"node_name": "Group15Cluster-3", "cpu_percent": 1.0, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.2, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.3, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.2, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.2, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.2, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.3, "ram_percent": 9.0, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-3", "cpu_percent": 0.9, "ram_percent": 9.1, "gpu_utilization_percent": 0.0, "temperature": 48.0}

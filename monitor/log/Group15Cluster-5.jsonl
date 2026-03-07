@@ -2234,3 +2234,11 @@
 {"node_name": "Group15Cluster-5", "timestamp": 1772437205.621323, "cpu_percent": 0.4, "ram_percent": 22.7, "net_bytes_sent": 630571868, "net_bytes_recv": 28450413993, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7685.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 39.0, "gpu_power_watts": 14.48}
 {"node_name": "Group15Cluster-5", "timestamp": 1772437206.649783, "cpu_percent": 0.5, "ram_percent": 22.8, "net_bytes_sent": 630572773, "net_bytes_recv": 28450414514, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7685.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 38.0, "gpu_power_watts": 14.41}
 {"node_name": "Group15Cluster-5", "timestamp": 1772437207.6776693, "cpu_percent": 0.4, "ram_percent": 22.9, "net_bytes_sent": 630573612, "net_bytes_recv": 28450414969, "gpu_utilization_percent": 0.0, "gpu_memory_used_mb": 7685.0, "gpu_memory_total_mb": 8192.0, "gpu_temperature_c": 38.0, "gpu_power_watts": 14.33}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.4, "ram_percent": 8.2, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.3, "ram_percent": 8.3, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.2, "ram_percent": 8.4, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.2, "ram_percent": 8.4, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.2, "ram_percent": 8.4, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.2, "ram_percent": 8.5, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.2, "ram_percent": 8.4, "gpu_utilization_percent": 0.0, "temperature": 48.0}
+{"node_name": "Group15Cluster-5", "cpu_percent": 0.3, "ram_percent": 8.3, "gpu_utilization_percent": 0.0, "temperature": 48.0}
