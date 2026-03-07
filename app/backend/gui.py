@@ -168,34 +168,51 @@ async def dispatch_loop():
     global WAITING_FOR_NODE
 
     while True:
-        job_id, payload, fut = await JOB_QUEUE.get()
+        # allow jobs to accumulate briefly (micro-batch window)
+        await asyncio.sleep(0.002)
 
-        WAITING_FOR_NODE += 1
-        await broadcast_status()
+        jobs = []
 
-        node = await AVAILABLE_NODES.get()
+        # collect multiple queued jobs
+        while not JOB_QUEUE.empty():
+            jobs.append(await JOB_QUEUE.get())
 
-        WAITING_FOR_NODE -= 1
-        IN_FLIGHT[node] += 1
-        await broadcast_status()
+            # safety cap so bursts don't grow too large
+            if len(jobs) >= 32:
+                break
 
-        async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
-            try:
-                result = await run_on_node(node, payload)
-                if not fut.cancelled():
-                    fut.set_result((node, result))
-            except Exception as e:
-                NODE_HEALTHY[node] = False
-                if not fut.cancelled():
-                    fut.set_exception(e)
-            finally:
-                IN_FLIGHT[node] -= 1
-                JOB_QUEUE.task_done()
-                if NODE_HEALTHY.get(node, True):
-                    AVAILABLE_NODES.put_nowait(node)
-                await broadcast_status()
+        # if nothing accumulated, block for one job
+        if not jobs:
+            jobs.append(await JOB_QUEUE.get())
 
-        asyncio.create_task(_do())
+        for job_id, payload, fut in jobs:
+
+            WAITING_FOR_NODE += 1
+            await broadcast_status()
+
+            node = await AVAILABLE_NODES.get()
+
+            WAITING_FOR_NODE -= 1
+            IN_FLIGHT[node] += 1
+            await broadcast_status()
+
+            async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
+                try:
+                    result = await run_on_node(node, payload)
+                    if not fut.cancelled():
+                        fut.set_result((node, result))
+                except Exception as e:
+                    NODE_HEALTHY[node] = False
+                    if not fut.cancelled():
+                        fut.set_exception(e)
+                finally:
+                    IN_FLIGHT[node] -= 1
+                    JOB_QUEUE.task_done()
+                    if NODE_HEALTHY.get(node, True):
+                        AVAILABLE_NODES.put_nowait(node)
+                    await broadcast_status()
+
+            asyncio.create_task(_do())
 
 
 # =============================
