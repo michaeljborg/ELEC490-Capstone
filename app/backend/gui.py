@@ -25,6 +25,8 @@ templates = Jinja2Templates(directory="app/frontend")
 app.include_router(monitoring_router)
 
 CURRENT_MODEL: str | None = None
+CURRENT_BATCH_SIZE: int = 1
+NODE_CONCURRENCY: int = 1
 
 # Initialize per-node runtime state (depends on NODE_POOL)
 IN_FLIGHT.update({node: 0 for node in NODE_POOL})
@@ -55,9 +57,6 @@ async def broadcast_status():
             await ws.send_json(status)
         except:
             ACTIVE_SESSIONS.discard(ws)
-
-
-NODE_CONCURRENCY = 1
 
 
 # =============================
@@ -122,45 +121,32 @@ async def websocket_status(websocket: WebSocket):
 # SSH RELAY
 # =============================
 
-def ssh_relay(node: str, payload) -> str:
+def http_relay(node: str, payload) -> str:
+    ip = node_interface_ip.NODES[node]
+
+    url = f"http://{ip}:8000/v1/chat/completions"
+
+    if isinstance(payload, list):
+        messages = payload
+    else:
+        messages = [{"role": "user", "content": payload}]
+
     data = {
-        "ip": node_interface_ip.NODES[node],
         "model": CURRENT_MODEL,
+        "messages": messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
     }
 
-    # detect payload type
-    if isinstance(payload, list):
-        data["messages"] = payload
-    else:
-        data["prompt"] = payload
+    r = requests.post(url, json=data, timeout=120)
+    r.raise_for_status()
 
-    b64 = base64.b64encode(json.dumps(data).encode()).decode()
-
-    remote_cmd = (
-        f'cd "{PATH_TO_SCRIPT}" && '
-        f'PYTHONPATH="{PATH_TO_SCRIPT}" '
-        f'python3 -c "import base64, json; '
-        f'from app.nodes import node_interface_ip; '
-        f'd=json.loads(base64.b64decode(\'{b64}\').decode()); '
-        f'print(node_interface_ip.query(**d))"'
-    )
-
-    proc = subprocess.run(
-        ["ssh", node, remote_cmd],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip())
-
-    return proc.stdout.strip()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, payload)
+    return await loop.run_in_executor(EXECUTOR, http_relay, node, payload)
 
 def _ssh_ok(node: str) -> bool:
     try:
@@ -296,9 +282,9 @@ def _check_vllm_node(node: str):
     except Exception as e:
         return False
 
-def _start_vllm_node(node: str, model: str):
+def _start_vllm_node(node: str, model: str, batch_size: int):
     try:
-        node_interface_ip.start(node, model=model)
+        node_interface_ip.start(node, model=model, batch_size=batch_size)
         node_interface_ip.wait_for_ready(node, timeout=120)
         return True, None
     except Exception as e:
@@ -321,9 +307,10 @@ def _stop_vllm_node(node: str):
 
 @app.post("/api/vllm/start")
 async def start_vllm_cluster(request: Request):
-    global CURRENT_MODEL
+    global CURRENT_MODEL, CURRENT_BATCH_SIZE, NODE_CONCURRENCY
     data = await request.json()
     model = data.get("model")
+    batch_size = int(data.get("batch_size", 1))
 
     if model not in AVAILABLE_MODELS:
         return {"ok": False, "error": "Invalid model"}
@@ -338,7 +325,7 @@ async def start_vllm_cluster(request: Request):
         return {"ok": False, "error": "No healthy nodes available"}
 
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model)
+        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model, batch_size)
         for node in healthy_nodes
     }
 
@@ -370,6 +357,16 @@ async def start_vllm_cluster(request: Request):
         }
 
     CURRENT_MODEL = model
+    CURRENT_BATCH_SIZE = batch_size
+    NODE_CONCURRENCY = batch_size
+
+    # rebuild node availability queue based on new concurrency
+    global AVAILABLE_NODES
+    AVAILABLE_NODES = asyncio.Queue()
+
+    for node in healthy_nodes:
+        for _ in range(NODE_CONCURRENCY):
+            AVAILABLE_NODES.put_nowait(node)
 
     return {
         "ok": True,
