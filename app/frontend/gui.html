@@ -443,6 +443,7 @@
 
     <script>
       const NODE_POOL = {{ node_pool_json | safe }};
+      console.log("NODE_POOL:", NODE_POOL);
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
@@ -450,7 +451,6 @@
 
       /* ===== CHAT HISTORY STATE ===== */
       let chatHistory = [];
-
       const nodeVllmState = Object.fromEntries(NODE_POOL.map(n => [n, "online"]));
 
       ws.onmessage = (event) => {
@@ -511,7 +511,7 @@
         return t;
       }
 
-      function addMessage(role, content, metaLabel = "") {
+      function addMessage(role, content, metaLabel=""){
         const messages = document.getElementById("messages");
 
         const row = document.createElement("div");
@@ -525,7 +525,7 @@
         bubble.className = `bubble ${role}`;
         bubble.innerHTML = renderText(content);
 
-        if (role === "user") {
+        if (role === "user"){
           row.appendChild(meta);
           row.appendChild(bubble);
         } else {
@@ -572,69 +572,112 @@
       }
 
       /* ===== UPDATED sendQuery (History Aware) ===== */
-      async function sendQuery() {
-        const input = document.getElementById("userPrompt");
-        const prompt = input.value.trim();
-        if (!prompt) return;
+      async function sendQuery(){
+      const input = document.getElementById("userPrompt");
+      const prompt = input.value.trim();
+      if (!prompt) return;
 
-        const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
-        const historyEnabled = document.getElementById("enableHistory").checked;
+      const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+      const historyEnabled = document.getElementById("enableHistory").checked;
 
-        // Render user's message bubble
-        addMessage("user", prompt);
+      addMessage("user", prompt);
 
-        let payload;
-        if (historyEnabled) {
-          chatHistory.push({ role: "user", content: prompt });
-          payload = { messages: chatHistory, job_id };
-        } else {
-          payload = { prompt, job_id };
+      let payload;
+      if (historyEnabled){
+        chatHistory.push({ role: "user", content: prompt });
+        payload = { messages: chatHistory, job_id };
+      } else {
+        payload = { prompt, job_id };
+      }
+
+      input.value = "";
+      autoGrowTextarea(input);
+
+      const row = addMessage("assistant", "", "...");
+      const bubble = row.querySelector(".bubble.assistant");
+      const meta = row.querySelector(".meta");
+
+      let streamedText = "";
+      let started = false;
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const jobWs = new WebSocket(`${protocol}//${window.location.host}/ws/job/${job_id}`);
+
+      jobWs.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "start") {
+          started = true;
+          if (meta && msg.node) meta.textContent = msg.node;
         }
 
-        input.value = "";
-        autoGrowTextarea(input);
-
-        // show typing while waiting
-        addTypingBubble();
-
-        // enqueue
-        const enq = await fetch("/enqueue", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        const enqData = await enq.json();
-        if (!enqData.ok) {
-          removeTypingBubble();
-          addMessage("assistant", "ERROR: " + enqData.error, "error");
-          if (historyEnabled) chatHistory.pop();
-          return;
+        else if (msg.type === "chunk") {
+          started = true;
+          streamedText += msg.text || "";
+          bubble.innerHTML = renderText(streamedText);
+          scrollMessagesToBottom();
         }
 
-        // you can optionally show a small system-ish assistant message about queue
-        // (comment out if you want it silent)
-        removeTypingBubble();
-        addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
-
-        // wait for completion
-        const typing2 = addTypingBubble();
-        const res = await fetch("/wait/" + encodeURIComponent(job_id));
-        const data = await res.json();
-        removeTypingBubble();
-
-        if (data.ok) {
-          // Render assistant response
-          addMessage("assistant", data.line, data.node);
-
+        else if (msg.type === "done") {
+          if (meta && msg.node) meta.textContent = msg.node;
           if (historyEnabled) {
-            chatHistory.push({ role: "assistant", content: data.line });
+            chatHistory.push({ role: "assistant", content: streamedText });
           }
+          jobWs.close();
+        }
+
+        else if (msg.type === "error") {
+          bubble.innerHTML = renderText("ERROR: " + (msg.error || "Unknown error"));
+          if (meta && msg.node) meta.textContent = msg.node;
+          jobWs.close();
+
+          if (historyEnabled && chatHistory.length && chatHistory[chatHistory.length - 1].role === "user") {
+            chatHistory.pop();
+          }
+        }
+      };
+
+      jobWs.onerror = () => {
+        bubble.innerHTML = renderText("ERROR: WebSocket connection failed.");
+        if (historyEnabled && chatHistory.length && chatHistory[chatHistory.length - 1].role === "user") {
+          chatHistory.pop();
+        }
+      };
+
+      jobWs.onclose = () => {
+        if (!started && !streamedText) {
+          bubble.innerHTML = renderText("ERROR: Stream closed before any response.");
+          if (historyEnabled && chatHistory.length && chatHistory[chatHistory.length - 1].role === "user") {
+            chatHistory.pop();
+          }
+        }
+      };
+
+      await new Promise((resolve) => {
+        if (jobWs.readyState === WebSocket.OPEN) {
+          resolve();
         } else {
-          addMessage("assistant", "ERROR: " + data.error, "error");
-          if (historyEnabled) chatHistory.pop();
+          jobWs.onopen = () => resolve();
+        }
+      });
+
+      const enq = await fetch("/enqueue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const enqData = await enq.json();
+
+      if (!enqData.ok){
+        bubble.innerHTML = renderText("ERROR: " + enqData.error);
+        jobWs.close();
+
+        if (historyEnabled && chatHistory.length && chatHistory[chatHistory.length - 1].role === "user") {
+          chatHistory.pop();
         }
       }
+    }
 
       async function spam50() {
         addMessage("assistant", "Enqueuing 50 prompts…", "system");

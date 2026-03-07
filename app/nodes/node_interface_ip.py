@@ -1,4 +1,5 @@
 import subprocess
+import json
 import requests
 
 NODES = {
@@ -84,3 +85,59 @@ def query(ip, model, prompt=None, messages=None, timeout=60):
     r = requests.post(url, json=payload, timeout=timeout)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"] 
+
+def stream_query(ip, model, prompt=None, messages=None, timeout=60):
+    port = 8000
+    url = f"http://{ip}:{port}/v1/chat/completions"
+
+    if messages:
+        payload_messages = messages
+    else:
+        payload_messages = [{"role": "user", "content": prompt}]
+
+    payload = {
+        "model": model,
+        "messages": payload_messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
+        "stream": True,
+    }
+
+    with requests.post(url, json=payload, stream=True, timeout=timeout) as r:
+        r.raise_for_status()
+
+        for raw_line in r.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+
+            line = raw_line.strip()
+
+            # vLLM streaming uses SSE-style lines: "data: {...}"
+            if not line.startswith("data:"):
+                continue
+
+            data = line[len("data:"):].strip()
+
+            if data == "[DONE]":
+                print(json.dumps({"type": "done"}), flush=True)
+                return
+
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta", {})
+            text = delta.get("content")
+
+            if text:
+                print(json.dumps({
+                    "type": "chunk",
+                    "text": text
+                }), flush=True)
+
+    print(json.dumps({"type": "done"}), flush=True)

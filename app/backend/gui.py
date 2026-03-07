@@ -7,6 +7,7 @@ import requests
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
 from app.nodes import node_interface_ip
 
 # Import ALL config settings
@@ -18,6 +19,9 @@ from app.config import AVAILABLE_MODELS
 from app.backend.monitoring import router as monitoring_router
 from app.backend.monitoring import start_metrics_listener
 
+from app.nodes import node_interface_ip
+from app.nodes import node_interface_class
+
 app = FastAPI()
 templates = Jinja2Templates(directory="app/frontend")
 
@@ -26,12 +30,16 @@ app.include_router(monitoring_router)
 
 CURRENT_MODEL: str | None = None
 
-# Initialize per-node runtime state (depends on NODE_POOL)
+# Initialize per-node runtime state
 IN_FLIGHT.update({node: 0 for node in NODE_POOL})
 LOCKS = {node: asyncio.Lock() for node in NODE_POOL}
 DISPATCHER_TASK: asyncio.Task | None = None
 
+NODE_CONCURRENCY = 1
 NODE_HEALTHY = {node: True for node in NODE_POOL}
+
+# Per-job websocket registry for streaming
+JOB_SOCKETS: dict[str, WebSocket] = {}
 
 
 # =============================
@@ -47,17 +55,42 @@ async def broadcast_status():
         "waiting_for_node": WAITING_FOR_NODE,
         "in_flight": dict(IN_FLIGHT),
         "total_users": len(ACTIVE_SESSIONS),
-        "node_healthy": dict(NODE_HEALTHY)
+        "node_healthy": dict(NODE_HEALTHY),
     }
 
     for ws in list(ACTIVE_SESSIONS):
         try:
             await ws.send_json(status)
-        except:
+        except Exception:
             ACTIVE_SESSIONS.discard(ws)
 
 
-NODE_CONCURRENCY = 1
+async def send_job_event(job_id: str, payload: dict):
+    ws = JOB_SOCKETS.get(job_id)
+    if not ws:
+        return
+
+    try:
+        await ws.send_json(payload)
+    except Exception:
+        JOB_SOCKETS.pop(job_id, None)
+
+
+# =============================
+# NODE HEALTH
+# =============================
+
+def _ssh_ok(node: str) -> bool:
+    try:
+        proc = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", node, "true"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 # =============================
@@ -69,7 +102,10 @@ async def startup_event():
     loop = asyncio.get_running_loop()
 
     # Only schedule nodes we can SSH into
-    checks = {node: loop.run_in_executor(EXECUTOR, _ssh_ok, node) for node in NODE_POOL}
+    checks = {
+        node: loop.run_in_executor(EXECUTOR, _ssh_ok, node)
+        for node in NODE_POOL
+    }
     results = await asyncio.gather(*checks.values())
 
     for node, ok in zip(checks.keys(), results):
@@ -81,6 +117,8 @@ async def startup_event():
             print(f"[WARN] {node} unreachable via SSH; skipping")
 
     asyncio.create_task(dispatch_loop())
+
+    # Start monitoring TCP listener
     start_metrics_listener()
 
 
@@ -101,7 +139,7 @@ async def home(request: Request):
 
 
 # =============================
-# WEBSOCKET STATUS
+# WEBSOCKETS
 # =============================
 
 @app.websocket("/ws/status")
@@ -118,8 +156,22 @@ async def websocket_status(websocket: WebSocket):
         await broadcast_status()
 
 
+@app.websocket("/ws/job/{job_id}")
+async def websocket_job(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    JOB_SOCKETS[job_id] = websocket
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        JOB_SOCKETS.pop(job_id, None)
+
+
 # =============================
-# SSH RELAY
+# SSH RELAY (NON-STREAMING)
 # =============================
 
 def ssh_relay(node: str, payload) -> str:
@@ -128,7 +180,6 @@ def ssh_relay(node: str, payload) -> str:
         "model": CURRENT_MODEL,
     }
 
-    # detect payload type
     if isinstance(payload, list):
         data["messages"] = payload
     else:
@@ -162,17 +213,97 @@ async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(EXECUTOR, ssh_relay, node, payload)
 
-def _ssh_ok(node: str) -> bool:
+
+# =============================
+# SSH RELAY (STREAMING)
+# =============================
+
+def ssh_stream_relay(node: str, payload, on_event) -> str:
+    """
+    Expects remote stream_query(...) to print one JSON event per line.
+    Example:
+      {"type":"chunk","text":"hello"}
+      {"type":"chunk","text":" world"}
+      {"type":"done"}
+    """
+    data = {
+        "ip": node_interface_ip.NODES[node],
+        "model": CURRENT_MODEL,
+        "stream": True,
+    }
+
+    if isinstance(payload, list):
+        data["messages"] = payload
+    else:
+        data["prompt"] = payload
+
+    b64 = base64.b64encode(json.dumps(data).encode()).decode()
+
+    remote_cmd = (
+        f'cd "{PATH_TO_SCRIPT}" && '
+        f'PYTHONPATH="{PATH_TO_SCRIPT}" '
+        f'python3 -c "import base64, json; '
+        f'from app.nodes import node_interface_ip; '
+        f'd=json.loads(base64.b64decode(\'{b64}\').decode()); '
+        f'node_interface_ip.stream_query(**d)"'
+    )
+
+    proc = subprocess.Popen(
+        ["ssh", node, remote_cmd],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    full_text_parts = []
+
     try:
-        proc = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", node, "true"],
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
+        assert proc.stdout is not None
+
+        for raw_line in proc.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = {"type": "chunk", "text": line}
+
+            if event.get("type") == "chunk":
+                text = event.get("text", "")
+                if text:
+                    full_text_parts.append(text)
+
+            on_event(event)
+
+        ret = proc.wait(timeout=10)
+
+        if ret != 0:
+            err = proc.stderr.read().strip() if proc.stderr else "Unknown SSH error"
+            raise RuntimeError(err)
+
+        return "".join(full_text_parts)
+
+    finally:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+async def run_stream_on_node(job_id: str, node: str, payload) -> str:
+    loop = asyncio.get_running_loop()
+
+    def worker():
+        def emit(event: dict):
+            asyncio.run_coroutine_threadsafe(send_job_event(job_id, event), loop)
+
+        return ssh_stream_relay(node, payload, emit)
+
+    return await asyncio.to_thread(worker)
+
 
 # =============================
 # DISPATCH LOOP
@@ -195,18 +326,36 @@ async def dispatch_loop():
 
         async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
             try:
-                result = await run_on_node(node, payload)
+                await send_job_event(job_id, {"type": "start", "node": node})
+
+                # Stream to websocket while also collecting final text
+                result = await run_stream_on_node(job_id, node, payload)
+
+                await send_job_event(job_id, {"type": "done", "node": node})
+
                 if not fut.cancelled():
                     fut.set_result((node, result))
+
             except Exception as e:
                 NODE_HEALTHY[node] = False
+
+                await send_job_event(job_id, {
+                    "type": "error",
+                    "node": node,
+                    "error": str(e),
+                })
+
                 if not fut.cancelled():
                     fut.set_exception(e)
+
             finally:
                 IN_FLIGHT[node] -= 1
                 JOB_QUEUE.task_done()
+
+                # Only return healthy nodes to rotation
                 if NODE_HEALTHY.get(node, True):
                     AVAILABLE_NODES.put_nowait(node)
+
                 await broadcast_status()
 
         asyncio.create_task(_do())
@@ -237,7 +386,6 @@ async def relay(request: Request):
 
 @app.post("/enqueue")
 async def enqueue(request: Request):
-
     if CURRENT_MODEL is None:
         return {"ok": False, "error": "No model loaded"}
 
@@ -289,12 +437,16 @@ async def wait(job_id: str):
 
 def _check_vllm_node(node: str):
     try:
+        if not NODE_HEALTHY.get(node, True):
+            return False
+
         ip = node_interface_ip.NODES[node]
         url = f"http://{ip}:8000/health"
         r = requests.get(url, timeout=2)
         return r.status_code == 200
-    except Exception as e:
+    except Exception:
         return False
+
 
 def _start_vllm_node(node: str, model: str):
     try:
@@ -322,20 +474,21 @@ def _stop_vllm_node(node: str):
 @app.post("/api/vllm/start")
 async def start_vllm_cluster(request: Request):
     global CURRENT_MODEL
+
     data = await request.json()
     model = data.get("model")
 
     if model not in AVAILABLE_MODELS:
         return {"ok": False, "error": "Invalid model"}
 
-    loop = asyncio.get_running_loop()
-    results = {}
-    errors = {}
-
     healthy_nodes = [node for node in NODE_POOL if NODE_HEALTHY.get(node, True)]
 
     if not healthy_nodes:
         return {"ok": False, "error": "No healthy nodes available"}
+
+    loop = asyncio.get_running_loop()
+    results = {}
+    errors = {}
 
     tasks = {
         node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model)
@@ -343,7 +496,6 @@ async def start_vllm_cluster(request: Request):
     }
 
     completed = await asyncio.gather(*tasks.values())
-
     started_any = False
 
     for node, (ok, err) in zip(tasks.keys(), completed):
@@ -355,7 +507,6 @@ async def start_vllm_cluster(request: Request):
         else:
             NODE_HEALTHY[node] = False
 
-    # mark skipped unhealthy nodes explicitly
     for node in NODE_POOL:
         if node not in results:
             results[node] = False
@@ -382,22 +533,29 @@ async def start_vllm_cluster(request: Request):
 @app.post("/api/vllm/stop")
 async def stop_vllm_cluster():
     global CURRENT_MODEL
+
     loop = asyncio.get_running_loop()
     results = {}
     errors = {}
 
-    # Launch all stop operations in parallel
+    healthy_nodes = [node for node in NODE_POOL if NODE_HEALTHY.get(node, True)]
+
     tasks = {
         node: loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
-        for node in NODE_POOL
+        for node in healthy_nodes
     }
 
-    completed = await asyncio.gather(*tasks.values())
+    if tasks:
+        completed = await asyncio.gather(*tasks.values())
+        for node, (ok, err) in zip(tasks.keys(), completed):
+            results[node] = ok
+            if err:
+                errors[node] = err
 
-    for node, (ok, err) in zip(tasks.keys(), completed):
-        results[node] = ok
-        if err:
-            errors[node] = err
+    for node in NODE_POOL:
+        if node not in results:
+            results[node] = False
+            errors[node] = "Skipped: node unhealthy/unreachable"
 
     CURRENT_MODEL = None
 
@@ -407,6 +565,7 @@ async def stop_vllm_cluster():
         "nodes": results,
         "errors": errors,
     }
+
 
 @app.get("/api/vllm/status")
 async def vllm_status():
@@ -420,13 +579,13 @@ async def vllm_status():
     results = await asyncio.gather(*tasks.values())
     node_status = dict(zip(tasks.keys(), results))
 
-    # Determine if at least one node is alive
     model_active = any(node_status.values())
 
     return {
         "model": CURRENT_MODEL if model_active else None,
         "nodes": node_status
     }
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -435,6 +594,8 @@ async def shutdown_event():
     loop = asyncio.get_running_loop()
 
     for node in NODE_POOL:
+        if not NODE_HEALTHY.get(node, True):
+            continue
         try:
             await loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
             print(f"Stopped vLLM on {node}")
@@ -443,9 +604,11 @@ async def shutdown_event():
 
     print("Cluster shutdown complete.")
 
+
 # =============================
-# Spam 50 
+# Spam 50
 # =============================
+
 @app.post("/spam50")
 async def spam50():
     loop = asyncio.get_running_loop()
