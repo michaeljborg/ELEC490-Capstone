@@ -29,6 +29,8 @@ templates = Jinja2Templates(directory="app/frontend")
 app.include_router(monitoring_router)
 
 CURRENT_MODEL: str | None = None
+CURRENT_BATCH_SIZE: int = 1
+NODE_CONCURRENCY: int = 1
 
 # Initialize per-node runtime state
 IN_FLIGHT.update({node: 0 for node in NODE_POOL})
@@ -63,34 +65,6 @@ async def broadcast_status():
             await ws.send_json(status)
         except Exception:
             ACTIVE_SESSIONS.discard(ws)
-
-
-async def send_job_event(job_id: str, payload: dict):
-    ws = JOB_SOCKETS.get(job_id)
-    if not ws:
-        return
-
-    try:
-        await ws.send_json(payload)
-    except Exception:
-        JOB_SOCKETS.pop(job_id, None)
-
-
-# =============================
-# NODE HEALTH
-# =============================
-
-def _ssh_ok(node: str) -> bool:
-    try:
-        proc = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", node, "true"],
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
 
 
 # =============================
@@ -174,44 +148,32 @@ async def websocket_job(websocket: WebSocket, job_id: str):
 # SSH RELAY (NON-STREAMING)
 # =============================
 
-def ssh_relay(node: str, payload) -> str:
-    data = {
-        "ip": node_interface_ip.NODES[node],
-        "model": CURRENT_MODEL,
-    }
+def http_relay(node: str, payload) -> str:
+    ip = node_interface_ip.NODES[node]
+
+    url = f"http://{ip}:8000/v1/chat/completions"
 
     if isinstance(payload, list):
-        data["messages"] = payload
+        messages = payload
     else:
-        data["prompt"] = payload
+        messages = [{"role": "user", "content": payload}]
 
-    b64 = base64.b64encode(json.dumps(data).encode()).decode()
+    data = {
+        "model": CURRENT_MODEL,
+        "messages": messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
+    }
 
-    remote_cmd = (
-        f'cd "{PATH_TO_SCRIPT}" && '
-        f'PYTHONPATH="{PATH_TO_SCRIPT}" '
-        f'python3 -c "import base64, json; '
-        f'from app.nodes import node_interface_ip; '
-        f'd=json.loads(base64.b64decode(\'{b64}\').decode()); '
-        f'print(node_interface_ip.query(**d))"'
-    )
+    r = requests.post(url, json=data, timeout=120)
+    r.raise_for_status()
 
-    proc = subprocess.run(
-        ["ssh", node, remote_cmd],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip())
-
-    return proc.stdout.strip()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, ssh_relay, node, payload)
+    return await loop.run_in_executor(EXECUTOR, http_relay, node, payload)
 
 
 # =============================
@@ -312,17 +274,51 @@ async def dispatch_loop():
     global WAITING_FOR_NODE
 
     while True:
-        job_id, payload, fut = await JOB_QUEUE.get()
+        # allow jobs to accumulate briefly (micro-batch window)
+        await asyncio.sleep(0.002)
 
-        WAITING_FOR_NODE += 1
-        await broadcast_status()
+        jobs = []
 
-        node = await AVAILABLE_NODES.get()
+        # collect multiple queued jobs
+        while not JOB_QUEUE.empty():
+            jobs.append(await JOB_QUEUE.get())
 
-        WAITING_FOR_NODE -= 1
-        IN_FLIGHT[node] += 1
-        await broadcast_status()
+            # safety cap so bursts don't grow too large
+            if len(jobs) >= 32:
+                break
 
+        # if nothing accumulated, block for one job
+        if not jobs:
+            jobs.append(await JOB_QUEUE.get())
+
+        for job_id, payload, fut in jobs:
+
+            WAITING_FOR_NODE += 1
+            await broadcast_status()
+
+            node = await AVAILABLE_NODES.get()
+
+            WAITING_FOR_NODE -= 1
+            IN_FLIGHT[node] += 1
+            await broadcast_status()
+
+            async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
+                try:
+                    result = await run_on_node(node, payload)
+                    if not fut.cancelled():
+                        fut.set_result((node, result))
+                except Exception as e:
+                    NODE_HEALTHY[node] = False
+                    if not fut.cancelled():
+                        fut.set_exception(e)
+                finally:
+                    IN_FLIGHT[node] -= 1
+                    JOB_QUEUE.task_done()
+                    if NODE_HEALTHY.get(node, True):
+                        AVAILABLE_NODES.put_nowait(node)
+                    await broadcast_status()
+
+            asyncio.create_task(_do())
         async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
             try:
                 await send_job_event(job_id, {"type": "start", "node": node})
@@ -460,10 +456,9 @@ def _check_vllm_node(node: str):
     except Exception:
         return False
 
-
-def _start_vllm_node(node: str, model: str):
+def _start_vllm_node(node: str, model: str, batch_size: int):
     try:
-        node_interface_ip.start(node, model=model)
+        node_interface_ip.start(node, model=model, batch_size=batch_size)
         node_interface_ip.wait_for_ready(node, timeout=120)
         return True, None
     except Exception as e:
@@ -486,10 +481,10 @@ def _stop_vllm_node(node: str):
 
 @app.post("/api/vllm/start")
 async def start_vllm_cluster(request: Request):
-    global CURRENT_MODEL
-
+    global CURRENT_MODEL, CURRENT_BATCH_SIZE, NODE_CONCURRENCY
     data = await request.json()
     model = data.get("model")
+    batch_size = int(data.get("batch_size", 1))
 
     if model not in AVAILABLE_MODELS:
         return {"ok": False, "error": "Invalid model"}
@@ -504,7 +499,7 @@ async def start_vllm_cluster(request: Request):
     errors = {}
 
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model)
+        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model, batch_size)
         for node in healthy_nodes
     }
 
@@ -534,6 +529,16 @@ async def start_vllm_cluster(request: Request):
         }
 
     CURRENT_MODEL = model
+    CURRENT_BATCH_SIZE = batch_size
+    NODE_CONCURRENCY = batch_size
+
+    # rebuild node availability queue based on new concurrency
+    global AVAILABLE_NODES
+    AVAILABLE_NODES = asyncio.Queue()
+
+    for node in healthy_nodes:
+        for _ in range(NODE_CONCURRENCY):
+            AVAILABLE_NODES.put_nowait(node)
 
     return {
         "ok": True,

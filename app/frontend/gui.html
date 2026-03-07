@@ -886,10 +886,37 @@
 
           addMessage("assistant", "Active model: " + data.model, "system");
         }
-      } catch (e) {
-        addMessage("assistant", "ERROR: " + e.message, "error");
-      }
-    }
+        try {
+          const model = document.getElementById("model-select").value;
+          const batch_size = parseInt(document.getElementById("batch-size-select").value);
+
+          if (!model) {
+            addMessage("assistant", "Please select a model first.", "error");
+            return;
+          }
+
+          document.getElementById("model-select").disabled = true;
+
+          const res = await fetch('/api/vllm/start', {
+            method: 'POST',
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model, batch_size })
+          });
+          const data = await res.json();
+
+          for (const node in data.nodes) {
+            if (data.nodes[node]) {
+              nodeVllmState[node] = "online";
+
+              // Immediately render as Free (no in-flight jobs yet)
+              const el = document.getElementById("status-" + node);
+              if (el) {
+                el.innerText = "Free";
+                el.style.color = "var(--good)";
+                el.style.borderColor = "rgba(53,255,122,.35)";
+              }
+
+              addMessage("assistant", "✔ " + node + " started.", "system");
 
     async function stopVLLMCluster() {
       addMessage("assistant", "Stopping vLLM on worker nodes…", "system");
@@ -1091,6 +1118,32 @@
           No model loaded
         </div>
       </div>
+      <div class="topbar">
+      <div>
+        <h3>Cluster Testing</h3>
+
+        <div class="controls">
+
+          <label style="font-size:13px;color:var(--muted);">
+            Batch Size
+          </label>
+
+          <select id="batch-size-select">
+            <option value="1" selected>1 (No Batching)</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
+            <option value="32">32</option>
+            <option value="64">64</option>
+            <option value="128">128</option>
+          </select>
+
+        </div>
+
+      </div>
+    </div>
+    </div>
 
 
     </div>

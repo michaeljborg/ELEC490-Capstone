@@ -11,11 +11,11 @@ NODES = {
     "node6": "192.168.50.6",
 }
 
-def start(hostname, model: str):
+def start(hostname, model: str, batch_size: int = 1):
     tmux_session = "vllm"
     venv_path = "~/vllm-venv"
     port = 8000
-    max_num_seqs = 32
+    max_num_seqs = batch_size
     max_model_len = 4096
     gpu_memory_utilization = 0.92
 
