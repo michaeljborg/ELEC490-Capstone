@@ -32,13 +32,18 @@ def collect_metrics():
     return data
 
 if __name__ == "__main__":
+    print(f"Starting monitor agent. Attempting to send to {HEADNODE_IP}:{PORT}")
     while True:
         metrics = collect_metrics()
+        print(f"Collected metrics for {metrics.get('node_name')}. CPU: {metrics.get('cpu_percent')}%")
+        
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
                 s.connect((HEADNODE_IP, PORT))
                 s.sendall(json.dumps(metrics).encode("utf-8"))
-        except Exception:
-            pass  # Fails silently if headnode is unreachable
+                print("Data sent successfully!")
+        except Exception as e:
+            print(f"Connection error: {e}")
             
         time.sleep(INTERVAL)
