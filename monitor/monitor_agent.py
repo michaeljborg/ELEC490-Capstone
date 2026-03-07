@@ -10,8 +10,16 @@ PORT = 5000
 INTERVAL = 1
 
 def collect_metrics():
+
+    raw_name = platform.node().split('.')[0]
+
+    if "Group15Cluster-" in raw_name:
+        formatted_name = "node" + raw_name.split("-")[1]
+    else:
+        formatted_name = raw_name
+        
     data = {
-        "node_name": platform.node().split('.')[0],
+        "node_name": formatted_name,
         "cpu_percent": psutil.cpu_percent(),
         "ram_percent": psutil.virtual_memory().percent
     }
