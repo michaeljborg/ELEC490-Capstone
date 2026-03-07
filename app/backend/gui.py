@@ -229,7 +229,6 @@ def ssh_stream_relay(node: str, payload, on_event) -> str:
     data = {
         "ip": node_interface_ip.NODES[node],
         "model": CURRENT_MODEL,
-        "stream": True,
     }
 
     if isinstance(payload, list):
@@ -337,12 +336,26 @@ async def dispatch_loop():
                     fut.set_result((node, result))
 
             except Exception as e:
-                NODE_HEALTHY[node] = False
+                err_text = str(e)
+
+                # Only quarantine for likely node/SSH/network failures
+                if any(x in err_text.lower() for x in [
+                    "ssh",
+                    "connection refused",
+                    "connection reset",
+                    "timed out",
+                    "timeout",
+                    "no route to host",
+                    "host unreachable",
+                    "network is unreachable",
+                    "could not resolve hostname",
+                ]):
+                    NODE_HEALTHY[node] = False
 
                 await send_job_event(job_id, {
                     "type": "error",
                     "node": node,
-                    "error": str(e),
+                    "error": err_text,
                 })
 
                 if not fut.cancelled():
