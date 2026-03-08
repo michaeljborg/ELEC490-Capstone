@@ -403,11 +403,15 @@
       }
 
       .metric-card .row {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: 70px 1fr 60px 1fr;
+        column-gap: 10px;
         margin-bottom: 6px;
         font-size: 13px;
+        align-items: center;
       }
+      
+      
 
       .label {
         color: var(--muted);
@@ -823,17 +827,25 @@
               if (!latest) {
                 html += '<div class="row"><span class="label">No data</span></div>';
               } else {
-                html += '<div class="row"><span class="label">GPU Util</span><span class="value">' + (latest.gpu_utilization_percent || 0).toFixed(0) + '%</span></div>';
-                
-                const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
-                const memTotal = latest.gpu_memory_total_mb ? (latest.gpu_memory_total_mb / 1024).toFixed(1) : 0;
-                html += '<div class="row"><span class="label">VRAM</span><span class="value">' + memUsed + ' / ' + memTotal + ' GB</span></div>';
-                
-                const temp = latest.temperature !== undefined ? latest.temperature.toFixed(1) + '°C' : 'N/A';
-                html += '<div class="row"><span class="label">Temp</span><span class="value">' + temp + '</span></div>';
+                  const gpuUtil = (latest.gpu_utilization_percent || 0).toFixed(0) + '%';
 
-                const power = latest.power_watts !== undefined ? latest.power_watts.toFixed(1) + 'W' : 'N/A';
-                html += '<div class="row"><span class="label">Power</span><span class="value">' + power + '</span></div>';
+                  const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
+                  const memTotal = latest.gpu_memory_total_mb ? (latest.gpu_memory_total_mb / 1024).toFixed(1) : 0;
+                  const vram = memUsed + ' / ' + memTotal + ' GB';
+
+                  const temp = latest.temperature !== undefined ? latest.temperature.toFixed(1) + '°C' : 'N/A';
+
+                  const power = latest.power_watts !== undefined ? latest.power_watts.toFixed(1) + 'W' : 'N/A';
+
+                  html += '<div class="row">'
+                        + '<span class="label">GPU Util</span><span class="value">' + gpuUtil + '</span>'
+                        + '<span class="label">VRAM</span><span class="value">' + vram + '</span>'
+                        + '</div>';
+
+                  html += '<div class="row">'
+                        + '<span class="label">Temp</span><span class="value">' + temp + '</span>'
+                        + '<span class="label">Power</span><span class="value">' + power + '</span>'
+                        + '</div>';
               }
               html += '</div>';
         }
