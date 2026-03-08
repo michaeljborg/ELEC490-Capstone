@@ -10,17 +10,16 @@ PORT = 5000
 INTERVAL = 1
 
 def collect_metrics():
-
     raw_name = platform.node().split('.')[0]
-
+    
     if "Group15Cluster-" in raw_name:
         formatted_name = "node" + raw_name.split("-")[1]
     else:
         formatted_name = raw_name
-        
+
     data = {
-            "node_name": formatted_name
-        }
+        "node_name": formatted_name
+    }
     
     try:
         result = subprocess.check_output([
@@ -29,12 +28,23 @@ def collect_metrics():
             "--format=csv,noheader,nounits"
         ]).decode("utf-8").strip()
         
-        util, mem_used, mem_total, temp, power = result.split(", ")
-        data["gpu_utilization_percent"] = float(util)
-        data["gpu_memory_used_mb"] = float(mem_used)
-        data["gpu_memory_total_mb"] = float(mem_total)
-        data["temperature"] = float(temp)
-        data["power_watts"] = float(power)
+        parts = result.split(", ")
+        
+        try: data["gpu_utilization_percent"] = float(parts[0])
+        except ValueError: pass
+        
+        try: data["gpu_memory_used_mb"] = float(parts[1])
+        except ValueError: pass
+        
+        try: data["gpu_memory_total_mb"] = float(parts[2])
+        except ValueError: pass
+        
+        try: data["temperature"] = float(parts[3])
+        except ValueError: pass
+        
+        try: data["power_watts"] = float(parts[4])
+        except ValueError: pass
+        
     except Exception:
         pass  
 
