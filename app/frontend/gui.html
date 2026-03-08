@@ -410,8 +410,28 @@
         font-size: 13px;
         align-items: center;
       }
-      
-      
+
+      .test-metrics-row{
+        display:flex;
+        justify-content:space-between;
+        gap:14px;
+        margin-top:6px;
+      }
+
+      .test-metric{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        flex:1;
+      }
+
+      .test-row {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        margin-bottom: 6px;
+        font-size: 13px;
+        align-items: center;
+      }
 
       .label {
         color: var(--muted);
@@ -424,12 +444,21 @@
 
       .leftcol {
         width: 260px;
-        /* adjust if you want */
         display: flex;
         flex-direction: column;
         gap: 16px;
         position: sticky;
         top: 24px;
+      }
+
+      .rightcol {
+        width: 380px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        position: sticky;
+        top: 24px;
+        height: fit-content;
       }
 
       /* sidebar is no longer the sticky element */
@@ -631,6 +660,50 @@
           // Render assistant response
           addMessage("assistant", data.line, data.node);
 
+        if (data.metrics) {
+
+          const m = data.metrics;
+
+          const html = `
+            <div class="metric-card">
+              <h4>Inference Metrics</h4>
+
+              <div class="test-row">
+                <span class="label">Node</span>
+                <span class="value">${m.node}</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Prompt Tokens</span>
+                <span class="value">${m.prompt_tokens}</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Completion Tokens</span>
+                <span class="value">${m.completion_tokens}</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Total Tokens</span>
+                <span class="value">${m.total_tokens}</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Latency</span>
+                <span class="value">${m.latency.toFixed(3)} s</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Tokens/sec</span>
+                <span class="value">${m.tokens_per_sec.toFixed(2)}</span>
+              </div>
+
+            </div>
+          `;
+
+          document.getElementById("test-output-content").innerHTML = html;
+        }
+          
           if (historyEnabled) {
             chatHistory.push({ role: "assistant", content: data.line });
           }
@@ -916,6 +989,9 @@
               <option value="">Select Model</option>
               <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
               <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
+              <option value="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4">Llama 3.1 8B (AWQ)</option>
+              <option value="meta-llama/Llama-3.2-3B-Instruct">Llama 3.2 3B (Native)</option>
+              <option value="google/gemma-2-2b-it">Gemma 2 2B (Native)</option>
             </select>
 
             <button onclick="startVLLMCluster()">Start vLLM</button>
@@ -975,14 +1051,58 @@
       </div>
     </div>
 
-    <div class="monitoring-panel">
-      <h3>Cluster Monitoring</h3>
-      <div class="monitoring-controls">
-        <button onclick="startMonitoring()">Start</button>
-        <button onclick="stopMonitoring()">Stop</button>
-        <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
+    <div class="rightcol">
+
+      <div class="monitoring-panel">
+        <h3>Cluster Monitoring</h3>
+        <div class="monitoring-controls">
+          <button onclick="startMonitoring()">Start</button>
+          <button onclick="stopMonitoring()">Stop</button>
+          <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
+        </div>
+        <div id="metrics-container" class="metrics-grid"></div>
       </div>
-      <div id="metrics-container" class="metrics-grid"></div>
+
+      <div class="monitoring-panel">
+        <h3>Test Output</h3>
+        <div id="test-output-content">
+          <div class="metric-card">
+            <h4>Inference Metrics</h4>
+
+            <div class="test-row">
+              <span class="label">Node</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Prompt Tokens</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Completion Tokens</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Total Tokens</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Latency</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Tokens/sec</span>
+              <span class="value">–</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
     </div>
   </body>
 
