@@ -66,6 +66,7 @@ async def broadcast_status():
 
 @app.on_event("startup")
 async def startup_event():
+    global DISPATCHER_TASK
     loop = asyncio.get_running_loop()
 
     # Only schedule nodes we can SSH into
@@ -95,8 +96,8 @@ async def home(request: Request):
         "gui.html",
         {
             "request": request,
-            "cfg.NODE_POOL": cfg.NODE_POOL,
-            "cfg.NODE_POOL_json": json.dumps(cfg.NODE_POOL),
+            "node_pool": cfg.NODE_POOL,
+            "node_pool_json": json.dumps(cfg.NODE_POOL),
         },
     )
 
@@ -325,22 +326,16 @@ def _ssh_ok(node: str) -> bool:
 # =============================
 
 async def dispatch_loop():
-
     while True:
-        # allow jobs to accumulate briefly (micro-batch window)
         await asyncio.sleep(0.002)
 
         jobs = []
 
-        # collect multiple queued jobs
         while not cfg.JOB_QUEUE.empty():
             jobs.append(await cfg.JOB_QUEUE.get())
-
-            # safety cap so bursts don't grow too large
             if len(jobs) >= 32:
                 break
 
-        # if nothing accumulated, block for one job
         if not jobs:
             jobs.append(await cfg.JOB_QUEUE.get())
 
@@ -378,6 +373,8 @@ async def dispatch_loop():
                     if NODE_HEALTHY.get(node, True):
                         cfg.AVAILABLE_NODES.put_nowait(node)
                     await broadcast_status()
+            asyncio.create_task(_do())
+            
 
 
 # =============================
@@ -503,7 +500,7 @@ async def start_vllm_cluster(request: Request):
     model = data.get("model")
     batch_size = int(data.get("batch_size", 1))
 
-    if model not in AVAILABLE_MODELS:
+    if model not in cfg.AVAILABLE_MODELS:
         return {"ok": False, "error": "Invalid model"}
 
     loop = asyncio.get_running_loop()
@@ -552,7 +549,21 @@ async def start_vllm_cluster(request: Request):
     NODE_CONCURRENCY = batch_size
 
     # rebuild node availability queue based on new concurrency
-    cfg.AVAILABLE_NODES = asyncio.Queue()
+    while True:
+        try:
+            cfg.AVAILABLE_NODES.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+
+    for node in healthy_nodes:
+        for _ in range(NODE_CONCURRENCY):
+            cfg.AVAILABLE_NODES.put_nowait(node)
+
+    while True:
+        try:
+            cfg.AVAILABLE_NODES.get_nowait()
+        except asyncio.QueueEmpty:
+            break
 
     for node in healthy_nodes:
         for _ in range(NODE_CONCURRENCY):
