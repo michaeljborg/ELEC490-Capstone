@@ -11,9 +11,7 @@ from fastapi.templating import Jinja2Templates
 from app.nodes import node_interface_ip
 
 # Import ALL config settings
-from app.config import *
-from app.config import SPAM_PROMPTS_50
-from app.config import AVAILABLE_MODELS
+import app.config as cfg
 
 # Import monitoring router + startup hook
 from app.backend.monitoring import router as monitoring_router
@@ -29,12 +27,12 @@ CURRENT_MODEL: str | None = None
 CURRENT_BATCH_SIZE: int = 1
 NODE_CONCURRENCY: int = 1
 
-# Initialize per-node runtime state (depends on NODE_POOL)
-IN_FLIGHT.update({node: 0 for node in NODE_POOL})
-LOCKS = {node: asyncio.Lock() for node in NODE_POOL}
+# Initialize per-node runtime state (depends on cfg.NODE_POOL)
+cfg.IN_FLIGHT.update({node: 0 for node in cfg.NODE_POOL})
+LOCKS = {node: asyncio.Lock() for node in cfg.NODE_POOL}
 DISPATCHER_TASK: asyncio.Task | None = None
 
-NODE_HEALTHY = {node: True for node in NODE_POOL}
+NODE_HEALTHY = {node: True for node in cfg.NODE_POOL}
 
 STREAM_QUEUES: dict[str, asyncio.Queue] = {}
 STREAM_DONE: dict[str, bool] = {}
@@ -45,22 +43,21 @@ JOB_META: dict[str, dict] = {}
 # =============================
 
 async def broadcast_status():
-    if not ACTIVE_SESSIONS:
+    if not cfg.ACTIVE_SESSIONS:
         return
 
     status = {
-        "queue_depth": JOB_QUEUE.qsize(),
-        "waiting_for_node": WAITING_FOR_NODE,
-        "in_flight": dict(IN_FLIGHT),
-        "total_users": len(ACTIVE_SESSIONS),
-        "node_healthy": dict(NODE_HEALTHY)
+        "queue_depth": cfg.JOB_QUEUE.qsize(),
+        "waiting_for_node": cfg.WAITING_FOR_NODE,
+        "in_flight": dict(cfg.IN_FLIGHT),
+        "total_users": len(cfg.ACTIVE_SESSIONS),
     }
 
-    for ws in list(ACTIVE_SESSIONS):
+    for ws in list(cfg.ACTIVE_SESSIONS):
         try:
             await ws.send_json(status)
         except:
-            ACTIVE_SESSIONS.discard(ws)
+            cfg.ACTIVE_SESSIONS.discard(ws)
 
 
 # =============================
@@ -72,18 +69,19 @@ async def startup_event():
     loop = asyncio.get_running_loop()
 
     # Only schedule nodes we can SSH into
-    checks = {node: loop.run_in_executor(EXECUTOR, _ssh_ok, node) for node in NODE_POOL}
+    checks = {node: loop.run_in_executor(cfg.EXECUTOR, _ssh_ok, node) for node in cfg.NODE_POOL}
     results = await asyncio.gather(*checks.values())
 
     for node, ok in zip(checks.keys(), results):
         NODE_HEALTHY[node] = ok
         if ok:
             for _ in range(NODE_CONCURRENCY):
-                AVAILABLE_NODES.put_nowait(node)
+                cfg.AVAILABLE_NODES.put_nowait(node)
         else:
             print(f"[WARN] {node} unreachable via SSH; skipping")
 
-    asyncio.create_task(dispatch_loop())
+    DISPATCHER_TASK = asyncio.create_task(dispatch_loop())
+    print("[STARTUP] dispatch loop started", DISPATCHER_TASK)
     start_metrics_listener()
 
 
@@ -97,8 +95,8 @@ async def home(request: Request):
         "gui.html",
         {
             "request": request,
-            "node_pool": NODE_POOL,
-            "node_pool_json": json.dumps(NODE_POOL),
+            "cfg.NODE_POOL": cfg.NODE_POOL,
+            "cfg.NODE_POOL_json": json.dumps(cfg.NODE_POOL),
         },
     )
 
@@ -110,14 +108,14 @@ async def home(request: Request):
 @app.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket):
     await websocket.accept()
-    ACTIVE_SESSIONS.add(websocket)
+    cfg.ACTIVE_SESSIONS.add(websocket)
     await broadcast_status()
 
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ACTIVE_SESSIONS.discard(websocket)
+        cfg.ACTIVE_SESSIONS.discard(websocket)
         await broadcast_status()
 
 @app.websocket("/ws/stream/{job_id}")
@@ -303,12 +301,12 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
 
 async def run_on_node_stream(node: str, payload, stream_q: asyncio.Queue):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, http_relay_stream, node, payload, loop, stream_q)
+    return await loop.run_in_executor(cfg.EXECUTOR, http_relay_stream, node, payload, loop, stream_q)
 
 
 async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, http_relay, node, payload)
+    return await loop.run_in_executor(cfg.EXECUTOR, http_relay, node, payload)
 
 def _ssh_ok(node: str) -> bool:
     try:
@@ -327,7 +325,6 @@ def _ssh_ok(node: str) -> bool:
 # =============================
 
 async def dispatch_loop():
-    global WAITING_FOR_NODE
 
     while True:
         # allow jobs to accumulate briefly (micro-batch window)
@@ -336,8 +333,8 @@ async def dispatch_loop():
         jobs = []
 
         # collect multiple queued jobs
-        while not JOB_QUEUE.empty():
-            jobs.append(await JOB_QUEUE.get())
+        while not cfg.JOB_QUEUE.empty():
+            jobs.append(await cfg.JOB_QUEUE.get())
 
             # safety cap so bursts don't grow too large
             if len(jobs) >= 32:
@@ -345,17 +342,17 @@ async def dispatch_loop():
 
         # if nothing accumulated, block for one job
         if not jobs:
-            jobs.append(await JOB_QUEUE.get())
+            jobs.append(await cfg.JOB_QUEUE.get())
 
         for job_id, payload, fut in jobs:
 
-            WAITING_FOR_NODE += 1
+            cfg.WAITING_FOR_NODE += 1
             await broadcast_status()
 
-            node = await AVAILABLE_NODES.get()
+            node = await cfg.AVAILABLE_NODES.get()
 
-            WAITING_FOR_NODE -= 1
-            IN_FLIGHT[node] += 1
+            cfg.WAITING_FOR_NODE -= 1
+            cfg.IN_FLIGHT[node] += 1
             await broadcast_status()
 
             async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
@@ -372,14 +369,14 @@ async def dispatch_loop():
                     if not fut.cancelled():
                         fut.set_result((node, result))
                 except Exception as e:
-                    NODE_HEALTHY[node] = False
+                    print(f"[DISPATCH] job failed on {node}: {e}")
                     if not fut.cancelled():
                         fut.set_exception(e)
                 finally:
-                    IN_FLIGHT[node] -= 1
-                    JOB_QUEUE.task_done()
+                    cfg.IN_FLIGHT[node] -= 1
+                    cfg.JOB_QUEUE.task_done()
                     if NODE_HEALTHY.get(node, True):
-                        AVAILABLE_NODES.put_nowait(node)
+                        cfg.AVAILABLE_NODES.put_nowait(node)
                     await broadcast_status()
 
 
@@ -396,7 +393,7 @@ async def relay(request: Request):
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
 
-    await JOB_QUEUE.put((job_id, prompt, fut))
+    await cfg.JOB_QUEUE.put((job_id, prompt, fut))
     await broadcast_status()
 
     try:
@@ -424,11 +421,11 @@ async def enqueue(request: Request):
     fut = loop.create_future()
     job_id = data.get("job_id") or "job"
 
-    ahead = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
+    ahead = cfg.JOB_QUEUE.qsize() + cfg.WAITING_FOR_NODE + sum(cfg.IN_FLIGHT.values())
     payload = messages if messages else prompt
 
-    await JOB_QUEUE.put((job_id, payload, fut))
-    PENDING[job_id] = fut
+    await cfg.JOB_QUEUE.put((job_id, payload, fut))
+    cfg.PENDING[job_id] = fut
     JOB_META[job_id] = {"stream": stream}
 
     if stream:
@@ -442,7 +439,7 @@ async def enqueue(request: Request):
 
 @app.get("/wait/{job_id}")
 async def wait(job_id: str):
-    fut = PENDING.get(job_id)
+    fut = cfg.PENDING.get(job_id)
 
     if fut is None:
         return {"ok": False, "error": "Unknown job_id"}
@@ -460,7 +457,7 @@ async def wait(job_id: str):
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:
-        PENDING.pop(job_id, None)
+        cfg.PENDING.pop(job_id, None)
 
 
 # =============================
@@ -513,13 +510,13 @@ async def start_vllm_cluster(request: Request):
     results = {}
     errors = {}
 
-    healthy_nodes = [node for node in NODE_POOL if NODE_HEALTHY.get(node, True)]
+    healthy_nodes = [node for node in cfg.NODE_POOL if NODE_HEALTHY.get(node, True)]
 
     if not healthy_nodes:
         return {"ok": False, "error": "No healthy nodes available"}
 
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _start_vllm_node, node, model, batch_size)
+        node: loop.run_in_executor(cfg.EXECUTOR, _start_vllm_node, node, model, batch_size)
         for node in healthy_nodes
     }
 
@@ -537,7 +534,7 @@ async def start_vllm_cluster(request: Request):
             NODE_HEALTHY[node] = False
 
     # mark skipped unhealthy nodes explicitly
-    for node in NODE_POOL:
+    for node in cfg.NODE_POOL:
         if node not in results:
             results[node] = False
             errors[node] = "Skipped: node unhealthy/unreachable"
@@ -555,12 +552,11 @@ async def start_vllm_cluster(request: Request):
     NODE_CONCURRENCY = batch_size
 
     # rebuild node availability queue based on new concurrency
-    global AVAILABLE_NODES
-    AVAILABLE_NODES = asyncio.Queue()
+    cfg.AVAILABLE_NODES = asyncio.Queue()
 
     for node in healthy_nodes:
         for _ in range(NODE_CONCURRENCY):
-            AVAILABLE_NODES.put_nowait(node)
+            cfg.AVAILABLE_NODES.put_nowait(node)
 
     return {
         "ok": True,
@@ -579,8 +575,8 @@ async def stop_vllm_cluster():
 
     # Launch all stop operations in parallel
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
-        for node in NODE_POOL
+        node: loop.run_in_executor(cfg.EXECUTOR, _stop_vllm_node, node)
+        for node in cfg.NODE_POOL
     }
 
     completed = await asyncio.gather(*tasks.values())
@@ -604,8 +600,8 @@ async def vllm_status():
     loop = asyncio.get_running_loop()
 
     tasks = {
-        node: loop.run_in_executor(EXECUTOR, _check_vllm_node, node)
-        for node in NODE_POOL
+        node: loop.run_in_executor(cfg.EXECUTOR, _check_vllm_node, node)
+        for node in cfg.NODE_POOL
     }
 
     results = await asyncio.gather(*tasks.values())
@@ -625,9 +621,9 @@ async def shutdown_event():
 
     loop = asyncio.get_running_loop()
 
-    for node in NODE_POOL:
+    for node in cfg.NODE_POOL:
         try:
-            await loop.run_in_executor(EXECUTOR, _stop_vllm_node, node)
+            await loop.run_in_executor(cfg.EXECUTOR, _stop_vllm_node, node)
             print(f"Stopped vLLM on {node}")
         except Exception as e:
             print(f"Failed to stop vLLM on {node}: {e}")
@@ -642,14 +638,14 @@ async def spam50():
     loop = asyncio.get_running_loop()
 
     job_ids = []
-    ahead_before = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
+    ahead_before = cfg.JOB_QUEUE.qsize() + cfg.WAITING_FOR_NODE + sum(cfg.IN_FLIGHT.values())
 
-    for i, p in enumerate(SPAM_PROMPTS_50, start=1):
+    for i, p in enumerate(cfg.SPAM_PROMPTS_50, start=1):
         fut = loop.create_future()
         job_id = f"spam-{i}-{int(loop.time()*1000)}"
 
-        PENDING[job_id] = fut
-        await JOB_QUEUE.put((job_id, p, fut))
+        cfg.PENDING[job_id] = fut
+        await cfg.JOB_QUEUE.put((job_id, p, fut))
         job_ids.append(job_id)
 
     await broadcast_status()
