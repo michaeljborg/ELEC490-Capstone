@@ -2,16 +2,14 @@ import subprocess
 
 # Configuration
 NODES = ["node2", "node3", "node4", "node5"]
-BRANCH = "matt"
+BRANCH = "main"
 PROJECT_PATH = "/home/cluster/ELEC490-Capstone"
 
 def sync_node(node):
     print(f"--- Syncing {node} ---")
     # Command to run on the remote node
-    #remote_cmd = f"cd {PROJECT_PATH} && git fetch origin && git checkout {BRANCH} && git pull {BRANCH}"
+    remote_cmd = f"cd {PROJECT_PATH} && git fetch origin && git checkout {BRANCH} && git pull origin {BRANCH}"
     
-    # sometimes this command needs to be done
-    remote_cmd = f"cd {PROJECT_PATH} && git fetch origin && git checkout {BRANCH} && git reset --hard origin/{BRANCH} && git clean -fd"
     try:
         # Run via SSH
         result = subprocess.run(
