@@ -48,6 +48,9 @@ monitoring_agents_started = False
 AVAILABLE_MODELS = [
     "Qwen/Qwen2.5-1.5B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct-AWQ",
+    "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
+    "meta-llama/Llama-3.2-3B-Instruct",
+    "google/gemma-2-2b-it"
 ]
 
 # Test Prompts
