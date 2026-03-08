@@ -3,6 +3,7 @@ import base64
 import json
 import asyncio
 import requests
+import threading
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -35,6 +36,9 @@ DISPATCHER_TASK: asyncio.Task | None = None
 
 NODE_HEALTHY = {node: True for node in NODE_POOL}
 
+STREAM_QUEUES: dict[str, asyncio.Queue] = {}
+STREAM_DONE: dict[str, bool] = {}
+JOB_META: dict[str, dict] = {}
 
 # =============================
 # STATUS BROADCAST
@@ -116,6 +120,32 @@ async def websocket_status(websocket: WebSocket):
         ACTIVE_SESSIONS.discard(websocket)
         await broadcast_status()
 
+@app.websocket("/ws/stream/{job_id}")
+async def websocket_stream(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+
+    stream_q = STREAM_QUEUES.get(job_id)
+    if stream_q is None:
+        await websocket.send_json({"type": "error", "error": "Unknown or non-streaming job_id"})
+        await websocket.close()
+        return
+
+    try:
+        while True:
+            item = await stream_q.get()
+
+            await websocket.send_json(item)
+
+            if item["type"] in ("done", "error"):
+                break
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        STREAM_QUEUES.pop(job_id, None)
+        STREAM_DONE.pop(job_id, None)
+        JOB_META.pop(job_id, None)
+
 
 # =============================
 # RELAY
@@ -175,6 +205,106 @@ def http_relay(node: str, payload):
         }
     }
 
+def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, stream_q: asyncio.Queue):
+    ip = node_interface_ip.NODES[node]
+    url = f"http://{ip}:8000/v1/chat/completions"
+
+    if isinstance(payload, list):
+        messages = payload
+    else:
+        messages = [{"role": "user", "content": payload}]
+
+    data = {
+        "model": CURRENT_MODEL,
+        "messages": messages,
+        "max_tokens": 1024,
+        "temperature": 0.7,
+        "stream": True,
+    }
+
+    start = time.time()
+    full_text = ""
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+
+    try:
+        with requests.post(url, json=data, timeout=180, stream=True) as r:
+            r.raise_for_status()
+
+            for raw_line in r.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+
+                line = raw_line.strip()
+
+                if not line.startswith("data:"):
+                    continue
+
+                data_str = line[5:].strip()
+
+                if data_str == "[DONE]":
+                    break
+
+                try:
+                    evt = json.loads(data_str)
+                except Exception:
+                    continue
+
+                choices = evt.get("choices", [])
+                if not choices:
+                    continue
+
+                delta = choices[0].get("delta", {})
+                chunk = delta.get("content", "")
+
+                if chunk:
+                    full_text += chunk
+                    loop.call_soon_threadsafe(stream_q.put_nowait, {
+                        "type": "chunk",
+                        "text": chunk,
+                    })
+
+                usage = evt.get("usage")
+                if usage:
+                    prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+                    completion_tokens = usage.get("completion_tokens", completion_tokens)
+                    total_tokens = usage.get("total_tokens", total_tokens)
+
+        end = time.time()
+        latency = end - start
+        tokens_per_sec = completion_tokens / latency if latency > 0 else 0
+
+        final_payload = {
+            "text": full_text,
+            "metrics": {
+                "node": node,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "latency": latency,
+                "tokens_per_sec": tokens_per_sec,
+            }
+        }
+
+        loop.call_soon_threadsafe(stream_q.put_nowait, {
+            "type": "done",
+            "final": final_payload,
+        })
+
+        return final_payload
+
+    except Exception as e:
+        loop.call_soon_threadsafe(stream_q.put_nowait, {
+            "type": "error",
+            "error": str(e),
+        })
+        raise
+
+async def run_on_node_stream(node: str, payload, stream_q: asyncio.Queue):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(EXECUTOR, http_relay_stream, node, payload, loop, stream_q)
+
 
 async def run_on_node(node: str, payload) -> str:
     loop = asyncio.get_running_loop()
@@ -230,7 +360,15 @@ async def dispatch_loop():
 
             async def _do(job_id=job_id, node=node, payload=payload, fut=fut):
                 try:
-                    result = await run_on_node(node, payload)
+                    meta = JOB_META.get(job_id, {})
+                    is_stream = meta.get("stream", False)
+
+                    if is_stream:
+                        stream_q = STREAM_QUEUES[job_id]
+                        result = await run_on_node_stream(node, payload, stream_q)
+                    else:
+                        result = await run_on_node(node, payload)
+
                     if not fut.cancelled():
                         fut.set_result((node, result))
                 except Exception as e:
@@ -243,8 +381,6 @@ async def dispatch_loop():
                     if NODE_HEALTHY.get(node, True):
                         AVAILABLE_NODES.put_nowait(node)
                     await broadcast_status()
-
-            asyncio.create_task(_do())
 
 
 # =============================
@@ -272,7 +408,6 @@ async def relay(request: Request):
 
 @app.post("/enqueue")
 async def enqueue(request: Request):
-
     if CURRENT_MODEL is None:
         return {"ok": False, "error": "No model loaded"}
 
@@ -280,6 +415,7 @@ async def enqueue(request: Request):
 
     prompt = (data.get("prompt") or "").strip()
     messages = data.get("messages")
+    stream = bool(data.get("stream", False))
 
     if not prompt and not messages:
         return {"ok": False, "error": "Empty input"}
@@ -289,15 +425,19 @@ async def enqueue(request: Request):
     job_id = data.get("job_id") or "job"
 
     ahead = JOB_QUEUE.qsize() + WAITING_FOR_NODE + sum(IN_FLIGHT.values())
-
     payload = messages if messages else prompt
 
     await JOB_QUEUE.put((job_id, payload, fut))
     PENDING[job_id] = fut
+    JOB_META[job_id] = {"stream": stream}
+
+    if stream:
+        STREAM_QUEUES[job_id] = asyncio.Queue()
+        STREAM_DONE[job_id] = False
 
     await broadcast_status()
 
-    return {"ok": True, "job_id": job_id, "ahead": ahead}
+    return {"ok": True, "job_id": job_id, "ahead": ahead, "stream": stream}
 
 
 @app.get("/wait/{job_id}")

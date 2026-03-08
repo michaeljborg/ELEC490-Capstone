@@ -571,6 +571,23 @@
         return row;
       }
 
+      function updateMessage(row, content, metaLabel = null) {
+        if (!row) return;
+
+        const bubble = row.querySelector(".bubble");
+        const meta = row.querySelector(".meta");
+
+        if (bubble) {
+          bubble.innerHTML = renderText(content);
+        }
+
+        if (meta && metaLabel !== null) {
+          meta.textContent = metaLabel;
+        }
+
+        scrollMessagesToBottom();
+      }
+
       function addTypingBubble() {
         const messages = document.getElementById("messages");
         const row = document.createElement("div");
@@ -613,31 +630,37 @@
         const job_id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
         const historyEnabled = document.getElementById("enableHistory").checked;
 
-        // Render user's message bubble
         addMessage("user", prompt);
 
         let payload;
         if (historyEnabled) {
           chatHistory.push({ role: "user", content: prompt });
-          payload = { messages: chatHistory, job_id };
+          payload = { messages: chatHistory, job_id, stream: true };
         } else {
-          payload = { prompt, job_id };
+          payload = { prompt, job_id, stream: true };
         }
 
         input.value = "";
         autoGrowTextarea(input);
 
-        // show typing while waiting
         addTypingBubble();
 
-        // enqueue
-        const enq = await fetch("/enqueue", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        let enqData;
+        try {
+          const enq = await fetch("/enqueue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
 
-        const enqData = await enq.json();
+          enqData = await enq.json();
+        } catch (err) {
+          removeTypingBubble();
+          addMessage("assistant", "ERROR: Failed to enqueue request", "error");
+          if (historyEnabled) chatHistory.pop();
+          return;
+        }
+
         if (!enqData.ok) {
           removeTypingBubble();
           addMessage("assistant", "ERROR: " + enqData.error, "error");
@@ -645,72 +668,117 @@
           return;
         }
 
-        // you can optionally show a small system-ish assistant message about queue
-        // (comment out if you want it silent)
         removeTypingBubble();
-        addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
-
-        // wait for completion
-        const typing2 = addTypingBubble();
-        const res = await fetch("/wait/" + encodeURIComponent(job_id));
-        const data = await res.json();
-        removeTypingBubble();
-
-        if (data.ok) {
-          // Render assistant response
-          addMessage("assistant", data.line, data.node);
-
-        if (data.metrics) {
-
-          const m = data.metrics;
-
-          const html = `
-            <div class="metric-card">
-              <h4>Inference Metrics</h4>
-
-              <div class="test-row">
-                <span class="label">Node</span>
-                <span class="value">${m.node}</span>
-              </div>
-
-              <div class="test-row">
-                <span class="label">Prompt Tokens</span>
-                <span class="value">${m.prompt_tokens}</span>
-              </div>
-
-              <div class="test-row">
-                <span class="label">Completion Tokens</span>
-                <span class="value">${m.completion_tokens}</span>
-              </div>
-
-              <div class="test-row">
-                <span class="label">Total Tokens</span>
-                <span class="value">${m.total_tokens}</span>
-              </div>
-
-              <div class="test-row">
-                <span class="label">Latency</span>
-                <span class="value">${m.latency.toFixed(3)} s</span>
-              </div>
-
-              <div class="test-row">
-                <span class="label">Tokens/sec</span>
-                <span class="value">${m.tokens_per_sec.toFixed(2)}</span>
-              </div>
-
-            </div>
-          `;
-
-          document.getElementById("test-output-content").innerHTML = html;
+        if (enqData.ahead > 0) {
+          addMessage("assistant", `Queued. ${enqData.ahead} ahead in line.`, "system");
         }
-          
-          if (historyEnabled) {
-            chatHistory.push({ role: "assistant", content: data.line });
+
+        addTypingBubble();
+
+        const wsProto = (location.protocol === "https:") ? "wss" : "ws";
+        const streamWs = new WebSocket(`${wsProto}://${location.host}/ws/stream/${encodeURIComponent(job_id)}`);
+
+        let started = false;
+        let fullText = "";
+        let streamRow = null;
+
+        streamWs.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === "chunk") {
+            if (!started) {
+              removeTypingBubble();
+              streamRow = addMessage("assistant", "", "Streaming");
+              started = true;
+            }
+
+            fullText += msg.text;
+            updateMessage(streamRow, fullText, "Streaming");
+            return;
           }
-        } else {
-          addMessage("assistant", "ERROR: " + data.error, "error");
+
+          if (msg.type === "done") {
+            removeTypingBubble();
+
+            const finalText = msg.final?.text ?? fullText;
+            const metrics = msg.final?.metrics ?? null;
+            const finalNode = metrics?.node ?? "assistant";
+
+            if (!started) {
+              streamRow = addMessage("assistant", finalText, finalNode);
+            } else {
+              updateMessage(streamRow, finalText, finalNode);
+            }
+
+            if (metrics) {
+              const m = metrics;
+
+              const html = `
+                <div class="metric-card">
+                  <h4>Inference Metrics</h4>
+
+                  <div class="test-row">
+                    <span class="label">Node</span>
+                    <span class="value">${m.node}</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Prompt Tokens</span>
+                    <span class="value">${m.prompt_tokens}</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Completion Tokens</span>
+                    <span class="value">${m.completion_tokens}</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Total Tokens</span>
+                    <span class="value">${m.total_tokens}</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Latency</span>
+                    <span class="value">${m.latency.toFixed(3)} s</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Tokens/sec</span>
+                    <span class="value">${m.tokens_per_sec.toFixed(2)}</span>
+                  </div>
+                </div>
+              `;
+
+              document.getElementById("test-output-content").innerHTML = html;
+            }
+
+            if (historyEnabled) {
+              chatHistory.push({ role: "assistant", content: finalText });
+            }
+
+            streamWs.close();
+            return;
+          }
+
+          if (msg.type === "error") {
+            removeTypingBubble();
+            addMessage("assistant", "ERROR: " + msg.error, "error");
+            if (historyEnabled) chatHistory.pop();
+            streamWs.close();
+          }
+        };
+
+        streamWs.onerror = () => {
+          removeTypingBubble();
+          addMessage("assistant", "ERROR: Streaming connection failed", "error");
           if (historyEnabled) chatHistory.pop();
-        }
+        };
+
+        streamWs.onclose = () => {
+          if (!started) {
+            removeTypingBubble();
+          }
+        };
       }
 
       async function spam50() {
