@@ -19,23 +19,24 @@ def collect_metrics():
         formatted_name = raw_name
         
     data = {
-        "node_name": formatted_name,
-        "cpu_percent": psutil.cpu_percent(),
-        "ram_percent": psutil.virtual_memory().percent
-    }
+            "node_name": formatted_name
+        }
     
     try:
         result = subprocess.check_output([
             "nvidia-smi",
-            "--query-gpu=utilization.gpu,temperature.gpu",
+            "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
             "--format=csv,noheader,nounits"
         ]).decode("utf-8").strip()
         
-        util, temp = result.split(", ")
+        util, mem_used, mem_total, temp, power = result.split(", ")
         data["gpu_utilization_percent"] = float(util)
+        data["gpu_memory_used_mb"] = float(mem_used)
+        data["gpu_memory_total_mb"] = float(mem_total)
         data["temperature"] = float(temp)
+        data["power_watts"] = float(power)
     except Exception:
-        pass  # Fails silently if nvidia-smi errors out
+        pass  
 
     return data
 

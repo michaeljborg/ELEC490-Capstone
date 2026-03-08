@@ -10,6 +10,8 @@ def sync_node(node):
     # Command to run on the remote node
     remote_cmd = f"cd {PROJECT_PATH} && git fetch origin && git checkout {BRANCH} && git pull {BRANCH}"
     
+    # sometimes this command needs to be done
+    #remote_cmd = f"cd {PROJECT_PATH} && git fetch origin && git checkout {BRANCH} && git reset --hard origin/{BRANCH} && git clean -fd"
     try:
         # Run via SSH
         result = subprocess.run(
