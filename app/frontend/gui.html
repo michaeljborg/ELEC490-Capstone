@@ -820,14 +820,22 @@
           const latest = info && info.latest ? info.latest : null;
 
           html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
-          if (!latest) {
-            html += '<div class="row"><span class="label">No data</span></div>';
-          } else {
-            html += '<div class="row"><span class="label">CPU</span><span class="value">' + latest.cpu_percent.toFixed(1) + '%</span></div>';
-            html += '<div class="row"><span class="label">RAM</span><span class="value">' + latest.ram_percent.toFixed(1) + '%</span></div>';
-            html += '<div class="row"><span class="label">GPU</span><span class="value">' + latest.gpu_utilization_percent.toFixed(0) + '%</span></div>';
-          }
-          html += '</div>';
+              if (!latest) {
+                html += '<div class="row"><span class="label">No data</span></div>';
+              } else {
+                html += '<div class="row"><span class="label">GPU Util</span><span class="value">' + (latest.gpu_utilization_percent || 0).toFixed(0) + '%</span></div>';
+                
+                const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
+                const memTotal = latest.gpu_memory_total_mb ? (latest.gpu_memory_total_mb / 1024).toFixed(1) : 0;
+                html += '<div class="row"><span class="label">VRAM</span><span class="value">' + memUsed + ' / ' + memTotal + ' GB</span></div>';
+                
+                const temp = latest.temperature !== undefined ? latest.temperature.toFixed(1) + '°C' : 'N/A';
+                html += '<div class="row"><span class="label">Temp</span><span class="value">' + temp + '</span></div>';
+
+                const power = latest.power_watts !== undefined ? latest.power_watts.toFixed(1) + 'W' : 'N/A';
+                html += '<div class="row"><span class="label">Power</span><span class="value">' + power + '</span></div>';
+              }
+              html += '</div>';
         }
         container.innerHTML = html;
       }
