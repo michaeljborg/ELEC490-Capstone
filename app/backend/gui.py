@@ -4,6 +4,7 @@ import json
 import asyncio
 import requests
 import threading
+import uuid
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -283,8 +284,6 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
 
 
                 if chunk:
-                    
-                    print(f"[STREAM] {node}: token received")
 
                     # TTFT
                     if first_token_time is None:
@@ -689,7 +688,7 @@ async def spam50():
 
     for i, p in enumerate(cfg.SPAM_PROMPTS_50, start=1):
         fut = loop.create_future()
-        job_id = f"spam-{i}-{int(loop.time()*1000)}"
+        job_id = f"spam-{uuid.uuid4().hex}"
 
         cfg.PENDING[job_id] = fut
 
