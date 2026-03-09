@@ -191,8 +191,6 @@ async def broadcast_shared_state():
         "state": SHARED_STATE
     }
 
-    print(f"[WS] broadcasting to {len(CONNECTED_CLIENTS)} clients: {payload}")
-
     dead = set()
     for ws in CONNECTED_CLIENTS:
         try:
