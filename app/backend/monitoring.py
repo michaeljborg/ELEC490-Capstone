@@ -59,15 +59,18 @@ def start_metrics_listener():
 
                             metrics_store[node_name].append(metrics)
 
-                        # write to disk log
-                        try:
-                            log_path = os.path.join(LOG_DIR, f"{node_name}.json")
+                        if monitoring_agents_started:
 
-                            with open(log_path, "a") as f:
-                                f.write(json.dumps(metrics) + "\n")
+                            try:
+                                log_path = os.path.join(LOG_DIR, f"{node_name}.json")
 
-                        except Exception as e:
-                            print(f"[WARN] Failed writing metrics log for {node_name}: {e}")
+                                with open(log_path, "a") as f:
+                                    f.write(json.dumps(metrics) + "\n")
+
+                            except Exception as e:
+                                print(f"[WARN] Failed writing metrics log for {node_name}: {e}")
+
+
 
                 except Exception as e:
                     print(f"[WARN] Metrics listener error: {e}")
@@ -134,16 +137,10 @@ async def monitoring_start():
         except Exception as e:
             print(f"[WARN] Failed writing test marker for {node}: {e}")
 
-    # Start monitoring agents on nodes
-    tasks = [
-        loop.run_in_executor(EXECUTOR, _ssh_start_monitor_agent, node)
-        for node in NODE_POOL
-    ]
+    # Enable logging only (agents already running)
+    monitoring_agents_started = True
 
-    results = await asyncio.gather(*tasks)
-
-    agents_status = dict(zip(NODE_POOL, results))
-    monitoring_agents_started = any(results)
+    agents_status = {node: True for node in NODE_POOL}
 
     return {
         "ok": True,
@@ -157,10 +154,8 @@ async def monitoring_stop():
     global monitoring_agents_started
     loop = asyncio.get_running_loop()
     
-    tasks = [loop.run_in_executor(EXECUTOR, _ssh_stop_monitor_agent, node) for node in NODE_POOL]
-    results = await asyncio.gather(*tasks)
-    
-    agents_status = dict(zip(NODE_POOL, results))
+    # Disable logging only (agents keep running)
+    agents_status = {node: True for node in NODE_POOL}
     monitoring_agents_started = False
 
     return {
