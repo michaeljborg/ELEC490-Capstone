@@ -1242,6 +1242,16 @@
         if (!metricsPollTimer) metricsPollTimer = setInterval(refreshMetrics, 2000);
       }
 
+      async function startMonitoring() {
+        const res = await fetch('/api/monitoring/start', { method: 'POST' });
+        const data = await res.json();
+
+        document.getElementById('monitoring-status-text').innerText =
+          data.monitoring_active ? 'Started' : 'Start failed on some nodes';
+
+        refreshMetrics();
+      }
+
       async function stopMonitoring() {
         const res = await fetch('/api/monitoring/stop', { method: 'POST' });
         await res.json();
