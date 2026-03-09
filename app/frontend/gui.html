@@ -29,6 +29,7 @@
       body {
         margin: 0;
         padding: 32px;
+        overflow-y: scroll;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
         background: radial-gradient(1200px 800px at 20% 10%, rgba(124, 58, 237, .18), transparent 60%),
           radial-gradient(900px 700px at 85% 40%, rgba(0, 245, 255, .12), transparent 55%),
@@ -113,11 +114,13 @@
       }
 
       .main {
-        width: min(900px, 100%);
+        width: 900px;
+        min-width: 900px;
+        max-width: 900px;
         display: flex;
         flex-direction: column;
         gap: 16px;
-        flex: 1;                      /* allow it to expand */
+        flex-shrink: 0;
       }
 
       .topbar {
@@ -365,7 +368,7 @@
 
       /* Monitoring panel (kept similar) */
       .monitoring-panel {
-        width: 380px;
+        width: 100%;
         background: var(--panel);
         backdrop-filter: blur(14px);
         border-radius: 18px;
@@ -461,14 +464,16 @@
 
       .rightcol {
         width: 380px;
+        min-width: 380px;
+        max-width: 380px;
         display: flex;
         flex-direction: column;
         gap: 16px;
         position: sticky;
         top: 24px;
         height: fit-content;
+        flex-shrink: 0;
       }
-
       /* sidebar is no longer the sticky element */
       .sidebar {
         position: static;
@@ -480,6 +485,106 @@
         width: 100%;
         padding: 18px 20px;
       }
+
+      .tab-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+
+      .tab-btn {
+        padding: 6px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(2,6,23,.35);
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-color: rgba(0,245,255,.35);
+        background: rgba(0,245,255,.08);
+      }
+
+      .subtab-bar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: nowrap;
+        margin-bottom: 8px;
+      }
+
+      .subtab-btn {
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(2,6,23,.35);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .subtab-btn.active {
+        color: var(--accent);
+        border-color: rgba(0,245,255,.35);
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
+      }
+
+      .test-output-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .test-output-tabs {
+        display: flex;
+        gap: 6px;
+      }
+
+      .save-metrics-wrap {
+        margin-top: 14px;
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .placeholder-text {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .metric-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .save-btn {
+        padding: 3px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(2,6,23,.35);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .save-btn:hover {
+        border-color: rgba(0,245,255,.35);
+        color: var(--accent);
+      }
+
     </style>
 
     <script>
@@ -488,6 +593,10 @@
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
 
       let metricsPollTimer = null;
+
+      let activeTestOutputTab = "single-node";
+      let activeMultiNodeSubtab = "system";
+      let latestSingleNodeMetrics = null;
 
       /* ===== CHAT HISTORY STATE ===== */
       let chatHistory = [];
@@ -629,6 +738,57 @@
         el.style.height = Math.min(el.scrollHeight, 180) + "px";
       }
 
+      function switchTestOutputTab(tabName) {
+        activeTestOutputTab = tabName;
+
+        document.querySelectorAll(".test-output-tab-btn").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.tab === tabName);
+        });
+
+        document.querySelectorAll(".test-output-panel-view").forEach(panel => {
+          panel.classList.toggle("active", panel.dataset.panel === tabName);
+        });
+      }
+
+      function switchMultiNodeSubtab(subtabName) {
+        activeMultiNodeSubtab = subtabName;
+
+        document.querySelectorAll(".multi-node-subtab-btn").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.subtab === subtabName);
+        });
+
+        document.querySelectorAll(".multi-node-subview").forEach(panel => {
+          panel.classList.toggle("active", panel.dataset.subview === subtabName);
+        });
+      }
+
+      async function saveSingleNodeMetrics() {
+        if (!latestSingleNodeMetrics) {
+          addMessage("assistant", "No single-node metrics available to save yet.", "system");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/save-single-node-metrics", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(latestSingleNodeMetrics)
+          });
+
+          const data = await res.json();
+
+          if (!data.ok) {
+            addMessage("assistant", "ERROR: " + data.error, "error");
+            return;
+          }
+
+          addMessage("assistant", "Saved single-node metrics to " + data.path, "system");
+        } catch (err) {
+          addMessage("assistant", "ERROR: Failed to save metrics: " + err.message, "error");
+        }
+      }
+
+
       /* ===== UPDATED sendQuery (History Aware) ===== */
       async function sendQuery() {
         const input = document.getElementById("userPrompt");
@@ -720,10 +880,17 @@
 
             if (metrics) {
               const m = metrics;
+              latestSingleNodeMetrics = {
+                ...m,
+                timestamp: new Date().toISOString()
+              };
 
               const html = `
                 <div class="metric-card">
-                  <h4>Inference Metrics</h4>
+                  <div class="metric-header">
+                    <h4>Inference Metrics</h4>
+                    <button class="save-btn" onclick="saveSingleNodeMetrics()">Save</button>
+                  </div>
 
                   <div class="test-row">
                     <span class="label">Node</span>
@@ -768,7 +935,8 @@
                 </div>
               `;
 
-              document.getElementById("test-output-content").innerHTML = html;
+              document.getElementById("single-node-test-output-content").innerHTML = html;
+              switchTestOutputTab("single-node");
             }
 
             if (historyEnabled) {
@@ -1054,6 +1222,9 @@
           }
         });
 
+        switchTestOutputTab("single-node");
+        switchMultiNodeSubtab("system");
+        
         // Optional: greet
         addMessage("assistant", "Ready. Send a prompt to the cluster.", "system");
       });
@@ -1172,52 +1343,141 @@
       </div>
 
       <div class="monitoring-panel">
-        <h3>Test Output</h3>
-        <div id="test-output-content">
-          <div class="metric-card">
-            <h4>Inference Metrics</h4>
+        <div class="test-output-header">
+          <h3 style="margin:0;">Test Output</h3>
 
-            <div class="test-row">
-              <span class="label">Node</span>
-              <span class="value">–</span>
-            </div>
+          <div class="test-output-tabs">
+            <button class="tab-btn test-output-tab-btn active"
+                    data-tab="single-node"
+                    onclick="switchTestOutputTab('single-node')">
+              Single Node
+            </button>
 
-            <div class="test-row">
-              <span class="label">Prompt Tokens</span>
-              <span class="value">–</span>
-            </div>
+            <button class="tab-btn test-output-tab-btn"
+                    data-tab="multi-node"
+                    onclick="switchTestOutputTab('multi-node')">
+              Multi Node
+            </button>
+          </div>
+        </div>
 
-            <div class="test-row">
-              <span class="label">Completion Tokens</span>
-              <span class="value">–</span>
-            </div>
+        <div class="tab-panel test-output-panel-view active" data-panel="single-node">
+          <div id="single-node-test-output-content">
+            <div class="metric-card">
+              <div class="metric-header">
+                <h4>Inference Metrics</h4>
+                <button class="save-btn" onclick="saveSingleNodeMetrics()">Save</button>
+              </div>
 
-            <div class="test-row">
-              <span class="label">Total Tokens</span>
-              <span class="value">–</span>
-            </div>
+              <div class="test-row">
+                <span class="label">Node</span>
+                <span class="value">–</span>
+              </div>
 
-            <div class="test-row">
-              <span class="label">TTFT</span>
-              <span class="value">–</span>
-            </div>
+              <div class="test-row">
+                <span class="label">Prompt Tokens</span>
+                <span class="value">–</span>
+              </div>
 
-            <div class="test-row">
-              <span class="label">Generation Time</span>
-              <span class="value">–</span>
-            </div>
+              <div class="test-row">
+                <span class="label">Completion Tokens</span>
+                <span class="value">–</span>
+              </div>
 
-            <div class="test-row">
-              <span class="label">Latency</span>
-              <span class="value">–</span>
-            </div>
+              <div class="test-row">
+                <span class="label">Total Tokens</span>
+                <span class="value">–</span>
+              </div>
 
-            <div class="test-row">
-              <span class="label">Tokens/sec</span>
-              <span class="value">–</span>
-            </div>
-            </div>
+              <div class="test-row">
+                <span class="label">TTFT</span>
+                <span class="value">–</span>
+              </div>
 
+              <div class="test-row">
+                <span class="label">Generation Time</span>
+                <span class="value">–</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Latency</span>
+                <span class="value">–</span>
+              </div>
+
+              <div class="test-row">
+                <span class="label">Tokens/sec</span>
+                <span class="value">–</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel test-output-panel-view" data-panel="multi-node">
+              <div class="subtab-bar">
+                <button class="subtab-btn multi-node-subtab-btn active"
+                        data-subtab="system"
+                        onclick="switchMultiNodeSubtab('system')">
+                  System
+                </button>
+
+                <button class="subtab-btn multi-node-subtab-btn"
+                        data-subtab="node2"
+                        onclick="switchMultiNodeSubtab('node2')">
+                  Node2
+                </button>
+
+                <button class="subtab-btn multi-node-subtab-btn"
+                        data-subtab="node3"
+                        onclick="switchMultiNodeSubtab('node3')">
+                  Node3
+                </button>
+
+                <button class="subtab-btn multi-node-subtab-btn"
+                        data-subtab="node4"
+                        onclick="switchMultiNodeSubtab('node4')">
+                  Node4
+                </button>
+
+                <button class="subtab-btn multi-node-subtab-btn"
+                        data-subtab="node5"
+                        onclick="switchMultiNodeSubtab('node5')">
+                  Node5
+                </button>
+              </div>
+
+          <div class="tab-panel multi-node-subview active" data-subview="system">
+            <div class="metric-card">
+              <h4>Inference Metrics - System</h4>
+              <div class="placeholder-text">Multi-node system-wide metrics will appear here later.</div>
+            </div>
+          </div>
+
+          <div class="tab-panel multi-node-subview" data-subview="node2">
+            <div class="metric-card">
+              <h4>Inference Metrics - Node2</h4>
+              <div class="placeholder-text">Node2 multi-node metrics will appear here later.</div>
+            </div>
+          </div>
+
+          <div class="tab-panel multi-node-subview" data-subview="node3">
+            <div class="metric-card">
+              <h4>Inference Metrics - Node3</h4>
+              <div class="placeholder-text">Node3 multi-node metrics will appear here later.</div>
+            </div>
+          </div>
+
+          <div class="tab-panel multi-node-subview" data-subview="node4">
+            <div class="metric-card">
+              <h4>Inference Metrics - Node4</h4>
+              <div class="placeholder-text">Node4 multi-node metrics will appear here later.</div>
+            </div>
+          </div>
+
+          <div class="tab-panel multi-node-subview" data-subview="node5">
+            <div class="metric-card">
+              <h4>Inference Metrics - Node5</h4>
+              <div class="placeholder-text">Node5 multi-node metrics will appear here later.</div>
+            </div>
           </div>
         </div>
       </div>
