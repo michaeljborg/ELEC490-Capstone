@@ -85,6 +85,14 @@
         align-items: center;
         gap: 12px;
       }
+      .sidebar-stats .node-item {
+        border-bottom: none;
+      }
+
+      .sidebar-stats {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 2px;
+      }
 
       .node-item:last-child {
         border-bottom: none;
@@ -794,22 +802,38 @@
 
       async function spam50() {
         addMessage("assistant", "Enqueuing 50 prompts…", "system");
+
         const res = await fetch("/spam50", { method: "POST" });
         const info = await res.json();
-        if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
 
-        for (const job_id of info.job_ids) {
-          const typing = addTypingBubble();
-          const r = await fetch("/wait/" + encodeURIComponent(job_id));
-          const data = await r.json();
-          removeTypingBubble();
-
-          if (data.ok) {
-            addMessage("assistant", data.line, data.node);
-          } else {
-            addMessage("assistant", "ERROR: " + data.error, "error");
-          }
+        if (!info.ok) {
+          addMessage("assistant", "ERROR: " + info.error, "error");
+          return;
         }
+
+        const waits = info.job_ids.map(async (job_id) => {
+
+          const typing = addTypingBubble();
+
+          try {
+            const response = await fetch("/wait/" + encodeURIComponent(job_id));
+            const data = await response.json();
+
+            removeTypingBubble();
+
+            if (data.ok) {
+              addMessage("assistant", data.line, data.node);
+            } else {
+              addMessage("assistant", "ERROR: " + data.error, "error");
+            }
+
+          } catch (err) {
+            removeTypingBubble();
+            addMessage("assistant", "ERROR: " + err.message, "error");
+          }
+        });
+
+        await Promise.all(waits);
       }
 
       /* ===== START/STOP VLLM ===== */
@@ -1063,7 +1087,17 @@
               <input type="checkbox" id="enableHistory">
               Enable Chat History
             </label>
-
+            <select id="batch-size-select">
+              <option value="">Select Batch Size</option>
+              <option value="1">1 (No Batching)</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="16">16</option>
+              <option value="32">32</option>
+              <option value="64">64</option>
+              <option value="128">128</option>
+            </select>
             <select id="model-select">
               <option value="">Select Model</option>
               <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
@@ -1075,7 +1109,6 @@
 
             <button onclick="startVLLMCluster()">Start vLLM</button>
             <button onclick="stopVLLMCluster()">Stop vLLM</button>
-            <button onclick="spam50()">Spam 50</button>
           </div>
 
           <div id="active-model-display" style="
@@ -1093,22 +1126,7 @@
         <h3>Cluster Testing</h3>
 
         <div class="controls">
-
-          <label style="font-size:13px;color:var(--muted);">
-            Batch Size
-          </label>
-
-          <select id="batch-size-select">
-            <option value="1" selected>1 (No Batching)</option>
-            <option value="2">2</option>
-            <option value="4">4</option>
-            <option value="8">8</option>
-            <option value="16">16</option>
-            <option value="32">32</option>
-            <option value="64">64</option>
-            <option value="128">128</option>
-          </select>
-
+                      <button onclick="spam50()">Spam 50</button>
         </div>
 
       </div>

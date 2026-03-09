@@ -154,54 +154,54 @@ import time
 
 import time
 
-# non-streaming response (NO LONGER USED)
-def http_relay(node: str, payload):
-    ip = node_interface_ip.NODES[node]
-    url = f"http://{ip}:8000/v1/chat/completions"
+# # non-streaming response (NO LONGER USED)
+# def http_relay(node: str, payload):
+#     ip = node_interface_ip.NODES[node]
+#     url = f"http://{ip}:8000/v1/chat/completions"
 
-    if isinstance(payload, list):
-        messages = payload
-    else:
-        messages = [{"role": "user", "content": payload}]
+#     if isinstance(payload, list):
+#         messages = payload
+#     else:
+#         messages = [{"role": "user", "content": payload}]
 
-    data = {
-        "model": CURRENT_MODEL,
-        "messages": messages,
-        "max_tokens": 1024,
-        "temperature": 0.7,
-    }
+#     data = {
+#         "model": CURRENT_MODEL,
+#         "messages": messages,
+#         "max_tokens": 1024,
+#         "temperature": 0.7,
+#     }
 
-    start = time.time()
+#     start = time.time()
 
-    r = requests.post(url, json=data, timeout=120)
-    r.raise_for_status()
+#     r = requests.post(url, json=data, timeout=120)
+#     r.raise_for_status()
 
-    end = time.time()
+#     end = time.time()
 
-    response = r.json()
+#     response = r.json()
 
-    text = response["choices"][0]["message"]["content"]
-    usage = response.get("usage", {})
+#     text = response["choices"][0]["message"]["content"]
+#     usage = response.get("usage", {})
 
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
-    total_tokens = usage.get("total_tokens", 0)
+#     prompt_tokens = usage.get("prompt_tokens", 0)
+#     completion_tokens = usage.get("completion_tokens", 0)
+#     total_tokens = usage.get("total_tokens", 0)
 
-    latency = end - start
+#     latency = end - start
 
-    tokens_per_sec = completion_tokens / latency if latency > 0 else 0
+#     tokens_per_sec = completion_tokens / latency if latency > 0 else 0
 
-    return {
-        "text": text,
-        "metrics": {
-            "node": node,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "latency": latency,
-            "tokens_per_sec": tokens_per_sec,
-        }
-    }
+#     return {
+#         "text": text,
+#         "metrics": {
+#             "node": node,
+#             "prompt_tokens": prompt_tokens,
+#             "completion_tokens": completion_tokens,
+#             "total_tokens": total_tokens,
+#             "latency": latency,
+#             "tokens_per_sec": tokens_per_sec,
+#         }
+#     }
 
 # streaming relay (IN USE)
 def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, stream_q: asyncio.Queue):
@@ -258,8 +258,6 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
                 # =============================
                 usage = evt.get("usage")
 
-                print(usage)
-                print(evt)
                 if usage:
                     prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
                     completion_tokens = usage.get("completion_tokens", completion_tokens)
@@ -272,7 +270,10 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
                 delta = choices[0].get("delta", {})
                 chunk = delta.get("content", "")
 
+
                 if chunk:
+                    
+                    print(f"[STREAM] {node}: token received")
 
                     # TTFT
                     if first_token_time is None:
@@ -680,6 +681,12 @@ async def spam50():
         job_id = f"spam-{i}-{int(loop.time()*1000)}"
 
         cfg.PENDING[job_id] = fut
+
+        # enable streaming
+        JOB_META[job_id] = {"stream": True}
+        STREAM_QUEUES[job_id] = asyncio.Queue()
+        STREAM_DONE[job_id] = False
+
         await cfg.JOB_QUEUE.put((job_id, p, fut))
         job_ids.append(job_id)
 
