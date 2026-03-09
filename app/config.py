@@ -3,6 +3,8 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import threading
+import json
+import requests
 
 # ==========================================================
 # CONFIG
@@ -53,57 +55,28 @@ AVAILABLE_MODELS = [
     "google/gemma-2-2b-it"
 ]
 
-# Test Prompts
-SPAM_PROMPTS_50 = [
-    "Say hello.",
-    "List 3 fruits.",
-    "Write one short joke.",
-    "Give 2 productivity tips.",
-    "Name 4 animals.",
-    "Describe coffee briefly.",
-    "Give one fun fact.",
-    "Write a short slogan about speed.",
-    "Say something positive.",
-    "Write a tiny poem (2 lines).",
-    "List 3 colors.",
-    "Describe the sky in one sentence.",
-    "Give one quick tech tip.",
-    "Say something funny (short).",
-    "Write one cheerful sentence.",
-    "Say good morning.",
-    "Say good evening.",
-    "List 3 vegetables.",
-    "Write a friendly greeting.",
-    "Say something encouraging.",
-    "Write one line about servers.",
-    "Name 5 tools.",
-    "Say something calm.",
-    "Give one tip about focus.",
-    "Write a short compliment.",
-    "List 3 cities.",
-    "Say something creative.",
-    "Write one sentence about teamwork.",
-    "Give one tiny idea for a project.",
-    "Write a short slogan (<=6 words).",
-    "Say thanks in a fun way.",
-    "Write a short message to a friend.",
-    "Describe rain in 8 words.",
-    "Name 3 hobbies.",
-    "Say something optimistic.",
-    "Write a tiny story (1 sentence).",
-    "List 3 drinks.",
-    "Say something confident.",
-    "Write one line about learning.",
-    "Say something nice about today.",
-    "Write a short toast (1 sentence).",
-    "Say hello again.",
-    "Write a short tagline for a cluster.",
-    "Give 3 quick tips for sleep.",
-    "Say something motivating.",
-    "Write a tiny rhyme.",
-    "Name 3 animals again.",
-    "Say something friendly.",
-    "Write a short good-luck message.",
-    "Say goodbye.",
-    "我草泥马"
-]
+# ==========================================================
+# BENCHMARK DATASET
+# ==========================================================
+BENCHMARK_PROMPTS = []
+PROMPTS_FILE = Path(PATH_TO_SCRIPT) / "benchmark_prompts.json"
+
+def load_benchmark_prompts():
+    global BENCHMARK_PROMPTS
+    if not PROMPTS_FILE.exists():
+        print("Downloading benchmark dataset (Alpaca)...")
+        url = "https://raw.githubusercontent.com/tatsu-lab/stanford_alpaca/main/alpaca_data.json"
+        try:
+            r = requests.get(url, timeout=30)
+            data = r.json()
+            BENCHMARK_PROMPTS = [item["instruction"] for item in data]
+            with open(PROMPTS_FILE, "w") as f:
+                json.dump(BENCHMARK_PROMPTS, f)
+        except Exception as e:
+            print(f"[WARN] Failed to load dataset: {e}")
+            BENCHMARK_PROMPTS = ["Fallback test prompt"] * 100 
+    else:
+        with open(PROMPTS_FILE, "r") as f:
+            BENCHMARK_PROMPTS = json.load(f)
+
+load_benchmark_prompts()

@@ -955,40 +955,77 @@
         };
       }
 
-      async function spam50() {
-        addMessage("assistant", "Enqueuing 50 prompts…", "system");
+      async function runBenchmark() {
+        const count = document.getElementById("benchmark-count").value;
+        addMessage("assistant", `Starting benchmark with ${count} prompts. Responses will be hidden. Gathering metrics...`, "system");
 
-        const res = await fetch("/spam50", { method: "POST" });
+        const res = await fetch("/api/benchmark/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ count: parseInt(count) })
+        });
+        
         const info = await res.json();
+        if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
 
-        if (!info.ok) {
-          addMessage("assistant", "ERROR: " + info.error, "error");
-          return;
-        }
+        let totalPromptTokens = 0;
+        let totalCompletionTokens = 0;
+        let totalLatency = 0; 
+        let completed = 0;
 
-        const waits = info.job_ids.map(async (job_id) => {
+        const startTime = performance.now();
 
-          const typing = addTypingBubble();
-
+        const fetchPromises = info.job_ids.map(async (job_id) => {
           try {
-            const response = await fetch("/wait/" + encodeURIComponent(job_id));
-            const data = await response.json();
-
-            removeTypingBubble();
-
-            if (data.ok) {
-              addMessage("assistant", data.line, data.node);
-            } else {
-              addMessage("assistant", "ERROR: " + data.error, "error");
+            const r = await fetch("/wait/" + encodeURIComponent(job_id));
+            const data = await r.json();
+            
+            if (data.ok && data.metrics) {
+              totalPromptTokens += data.metrics.prompt_tokens;
+              totalCompletionTokens += data.metrics.completion_tokens;
+              totalLatency += data.metrics.latency;
+              completed++;
             }
-
-          } catch (err) {
-            removeTypingBubble();
-            addMessage("assistant", "ERROR: " + err.message, "error");
+          } catch (e) {
+            console.error("Job failed:", e);
           }
         });
 
-        await Promise.all(waits);
+        await Promise.all(fetchPromises);
+        const endTime = performance.now();
+
+        const wallClockTimeSec = (endTime - startTime) / 1000;
+        const completionTokensPerSec = totalCompletionTokens / wallClockTimeSec; 
+
+        addMessage("assistant", `Benchmark complete: ${completed}/${info.enqueued} succeeded. Results posted to Test Output.`, "system");
+
+        const html = `
+          <div class="metric-card">
+            <div class="metric-header">
+              <h4>Benchmark Results (${count} prompts)</h4>
+            </div>
+            <div class="test-row">
+              <span class="label">Wall Clock Time</span>
+              <span class="value">${wallClockTimeSec.toFixed(2)} s</span>
+            </div>
+            <div class="test-row">
+              <span class="label">Total Prompt Tokens</span>
+              <span class="value">${totalPromptTokens.toLocaleString()}</span>
+            </div>
+            <div class="test-row">
+              <span class="label">Total Comp Tokens</span>
+              <span class="value">${totalCompletionTokens.toLocaleString()}</span>
+            </div>
+            <div class="test-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <span class="label" style="color: var(--accent);">Cluster Throughput</span>
+              <span class="value" style="color: var(--good);">${completionTokensPerSec.toFixed(2)} tok/sec</span>
+            </div>
+          </div>
+        `;
+
+        document.querySelector('[data-subview="system"]').innerHTML = html;
+        switchTestOutputTab("multi-node");
+        switchMultiNodeSubtab("system");
       }
 
       /* ===== START/STOP VLLM ===== */
@@ -1378,7 +1415,8 @@
         <h3>Cluster Testing</h3>
 
         <div class="controls">
-                      <button onclick="spam50()">Spam 50</button>
+          <input type="number" id="benchmark-count" value="50" min="1" placeholder="Prompts" style="width: 100px; padding: 8px 12px; border-radius: 8px; background: rgba(2,6,23,.35); color: var(--text); border: 1px solid rgba(148,163,184,.25);">
+          <button onclick="runBenchmark()">Run Benchmark</button>
         </div>
 
       </div>

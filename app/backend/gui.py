@@ -786,23 +786,25 @@ async def save_single_node_metrics(request: Request):
         }
 
 
-# =============================
-# Spam 50 
-# =============================
-@app.post("/spam50")
-async def spam50():
+@app.post("/api/benchmark/run")
+async def run_benchmark(request: Request):
+    data = await request.json()
+    count = int(data.get("count", 50))
+    
     loop = asyncio.get_running_loop()
-
     job_ids = []
     ahead_before = cfg.JOB_QUEUE.qsize() + cfg.WAITING_FOR_NODE + sum(cfg.IN_FLIGHT.values())
 
-    for i, p in enumerate(cfg.SPAM_PROMPTS_50, start=1):
+    # Deterministically slice the dataset
+    prompts_to_run = cfg.BENCHMARK_PROMPTS[:count]
+
+    for i, p in enumerate(prompts_to_run):
         fut = loop.create_future()
-        job_id = f"spam-{uuid.uuid4().hex}"
+        job_id = f"bench-{i}-{uuid.uuid4().hex}"
 
         cfg.PENDING[job_id] = fut
 
-        # enable streaming
+        # enable streaming (matching your updated gui.py architecture)
         JOB_META[job_id] = {"stream": True}
         STREAM_QUEUES[job_id] = asyncio.Queue()
         STREAM_DONE[job_id] = False
@@ -814,7 +816,7 @@ async def spam50():
 
     return {
         "ok": True,
-        "enqueued": 50,
+        "enqueued": len(prompts_to_run),
         "ahead_before": ahead_before,
         "job_ids": job_ids,
     }
