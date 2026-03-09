@@ -31,6 +31,15 @@ CURRENT_MODEL: str | None = None
 CURRENT_BATCH_SIZE: int = 1
 NODE_CONCURRENCY: int = 1
 
+SHARED_STATE = {
+    "current_model": None,
+    "batch_size": 1,
+    "nodes": {node: "offline" for node in cfg.NODE_POOL}
+}
+
+STATE_LOCK = asyncio.Lock()
+CONNECTED_CLIENTS: set[WebSocket] = set()
+
 # Initialize per-node runtime state (depends on cfg.NODE_POOL)
 cfg.IN_FLIGHT.update({node: 0 for node in cfg.NODE_POOL})
 LOCKS = {node: asyncio.Lock() for node in cfg.NODE_POOL}
@@ -47,21 +56,11 @@ JOB_META: dict[str, dict] = {}
 # =============================
 
 async def broadcast_status():
-    if not cfg.ACTIVE_SESSIONS:
-        return
+    async with STATE_LOCK:
+        SHARED_STATE["queue_depth"] = cfg.JOB_QUEUE.qsize() + cfg.WAITING_FOR_NODE
+        SHARED_STATE["total_users"] = len(CONNECTED_CLIENTS)
 
-    status = {
-        "queue_depth": cfg.JOB_QUEUE.qsize(),
-        "waiting_for_node": cfg.WAITING_FOR_NODE,
-        "in_flight": dict(cfg.IN_FLIGHT),
-        "total_users": len(cfg.ACTIVE_SESSIONS),
-    }
-
-    for ws in list(cfg.ACTIVE_SESSIONS):
-        try:
-            await ws.send_json(status)
-        except:
-            cfg.ACTIVE_SESSIONS.discard(ws)
+    await broadcast_shared_state()
 
 
 # =============================
@@ -121,16 +120,23 @@ async def home(request: Request):
 # =============================
 
 @app.websocket("/ws/status")
-async def websocket_status(websocket: WebSocket):
-    await websocket.accept()
-    cfg.ACTIVE_SESSIONS.add(websocket)
+async def websocket_status(ws: WebSocket):
+    await ws.accept()
+    CONNECTED_CLIENTS.add(ws)
+    print(f"[WS] connected, total clients = {len(CONNECTED_CLIENTS)}")
+
     await broadcast_status()
 
     try:
         while True:
-            await websocket.receive_text()
+            await asyncio.sleep(60)
     except WebSocketDisconnect:
-        cfg.ACTIVE_SESSIONS.discard(websocket)
+        CONNECTED_CLIENTS.discard(ws)
+        print(f"[WS] disconnected, total clients = {len(CONNECTED_CLIENTS)}")
+        await broadcast_status()
+    except Exception as e:
+        CONNECTED_CLIENTS.discard(ws)
+        print(f"[WS] error: {e}, total clients = {len(CONNECTED_CLIENTS)}")
         await broadcast_status()
 
 @app.websocket("/ws/stream/{job_id}")
@@ -159,6 +165,44 @@ async def websocket_stream(websocket: WebSocket, job_id: str):
         STREAM_DONE.pop(job_id, None)
         JOB_META.pop(job_id, None)
 
+_UNSET = object()
+
+async def update_shared_state(model=_UNSET, batch_size=_UNSET, node_updates=None):
+    global CURRENT_MODEL, CURRENT_BATCH_SIZE
+
+    async with STATE_LOCK:
+        if model is not _UNSET:
+            CURRENT_MODEL = model
+            SHARED_STATE["current_model"] = model
+
+        if batch_size is not _UNSET:
+            CURRENT_BATCH_SIZE = batch_size
+            SHARED_STATE["batch_size"] = batch_size
+
+        if node_updates:
+            for node, status in node_updates.items():
+                SHARED_STATE["nodes"][node] = status
+
+    await broadcast_shared_state()
+
+async def broadcast_shared_state():
+    payload = {
+        "type": "shared_state",
+        "state": SHARED_STATE
+    }
+
+    print(f"[WS] broadcasting to {len(CONNECTED_CLIENTS)} clients: {payload}")
+
+    dead = set()
+    for ws in CONNECTED_CLIENTS:
+        try:
+            await ws.send_json(payload)
+        except Exception as e:
+            print(f"[WS] send failed: {e}")
+            dead.add(ws)
+
+    for ws in dead:
+        CONNECTED_CLIENTS.discard(ws)
 
 # =============================
 # RELAY
@@ -383,6 +427,8 @@ async def dispatch_loop():
 
             node = await cfg.AVAILABLE_NODES.get()
 
+            await update_shared_state(node_updates={node: "in-use"})
+
             cfg.WAITING_FOR_NODE -= 1
             cfg.IN_FLIGHT[node] += 1
             await broadcast_status()
@@ -406,6 +452,7 @@ async def dispatch_loop():
                         fut.set_exception(e)
                 finally:
                     cfg.IN_FLIGHT[node] -= 1
+                    await update_shared_state(node_updates={node: "free"})
                     cfg.JOB_QUEUE.task_done()
                     if NODE_HEALTHY.get(node, True):
                         cfg.AVAILABLE_NODES.put_nowait(node)
@@ -535,7 +582,13 @@ async def start_vllm_cluster(request: Request):
     global CURRENT_MODEL, CURRENT_BATCH_SIZE, NODE_CONCURRENCY
     data = await request.json()
     model = data.get("model")
-    batch_size = int(data.get("batch_size", 1))
+    batch_size_raw = data.get("batch_size")
+    batch_size = int(batch_size_raw) if batch_size_raw is not None else 1
+
+    if model not in cfg.AVAILABLE_MODELS:
+        return {"ok": False, "error": "Invalid model"}
+
+    await update_shared_state(model=model, batch_size=batch_size)
 
     if model not in cfg.AVAILABLE_MODELS:
         return {"ok": False, "error": "Invalid model"}
@@ -548,6 +601,12 @@ async def start_vllm_cluster(request: Request):
 
     if not healthy_nodes:
         return {"ok": False, "error": "No healthy nodes available"}
+
+    await update_shared_state(
+        model=model,
+        batch_size=batch_size,
+        node_updates={node: "startup" for node in healthy_nodes}
+    )
 
     tasks = {
         node: loop.run_in_executor(cfg.EXECUTOR, _start_vllm_node, node, model, batch_size)
@@ -569,6 +628,7 @@ async def start_vllm_cluster(request: Request):
 
     # mark skipped unhealthy nodes explicitly
     for node in cfg.NODE_POOL:
+        await update_shared_state(node_updates={node: "startup"})
         if node not in results:
             results[node] = False
             errors[node] = "Skipped: node unhealthy/unreachable"
@@ -596,15 +656,11 @@ async def start_vllm_cluster(request: Request):
         for _ in range(NODE_CONCURRENCY):
             cfg.AVAILABLE_NODES.put_nowait(node)
 
-    while True:
-        try:
-            cfg.AVAILABLE_NODES.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-
-    for node in healthy_nodes:
-        for _ in range(NODE_CONCURRENCY):
-            cfg.AVAILABLE_NODES.put_nowait(node)
+    await update_shared_state(
+        model=model,
+        batch_size=batch_size,
+        node_updates={node: "free" for node in healthy_nodes}
+    )
 
     return {
         "ok": True,
@@ -629,12 +685,34 @@ async def stop_vllm_cluster():
 
     completed = await asyncio.gather(*tasks.values())
 
+    node_updates = {}
+
     for node, (ok, err) in zip(tasks.keys(), completed):
         results[node] = ok
         if err:
             errors[node] = err
 
+        if ok:
+            started_any = True
+            node_updates[node] = "free"
+        else:
+            NODE_HEALTHY[node] = False
+            node_updates[node] = "offline"
+
+    for node in cfg.NODE_POOL:
+        if node not in results:
+            results[node] = False
+            errors[node] = "Skipped: node unhealthy/unreachable"
+            node_updates[node] = "offline"
+
     CURRENT_MODEL = None
+
+    await update_shared_state(
+        model=None,
+        node_updates={node: "offline" for node in cfg.NODE_POOL}
+    )
+
+    await broadcast_status()
 
     return {
         "ok": True,
