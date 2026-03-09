@@ -154,6 +154,7 @@ import time
 
 import time
 
+# non-streaming response (NO LONGER USED)
 def http_relay(node: str, payload):
     ip = node_interface_ip.NODES[node]
     url = f"http://{ip}:8000/v1/chat/completions"
@@ -190,8 +191,6 @@ def http_relay(node: str, payload):
 
     tokens_per_sec = completion_tokens / latency if latency > 0 else 0
 
-
-
     return {
         "text": text,
         "metrics": {
@@ -204,6 +203,7 @@ def http_relay(node: str, payload):
         }
     }
 
+# streaming relay (IN USE)
 def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, stream_q: asyncio.Queue):
     ip = node_interface_ip.NODES[node]
     url = f"http://{ip}:8000/v1/chat/completions"
@@ -219,9 +219,12 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
         "max_tokens": 1024,
         "temperature": 0.7,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
 
     start = time.time()
+    first_token_time = None
+
     full_text = ""
     prompt_tokens = 0
     completion_tokens = 0
@@ -250,6 +253,18 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
                 except Exception:
                     continue
 
+                # =============================
+                # Capture usage (comes at end)
+                # =============================
+                usage = evt.get("usage")
+
+                print(usage)
+                print(evt)
+                if usage:
+                    prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+                    completion_tokens = usage.get("completion_tokens", completion_tokens)
+                    total_tokens = usage.get("total_tokens", total_tokens)
+
                 choices = evt.get("choices", [])
                 if not choices:
                     continue
@@ -258,21 +273,28 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
                 chunk = delta.get("content", "")
 
                 if chunk:
+
+                    # TTFT
+                    if first_token_time is None:
+                        first_token_time = time.time()                    
+
                     full_text += chunk
                     loop.call_soon_threadsafe(stream_q.put_nowait, {
                         "type": "chunk",
                         "text": chunk,
                     })
 
-                usage = evt.get("usage")
-                if usage:
-                    prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
-                    completion_tokens = usage.get("completion_tokens", completion_tokens)
-                    total_tokens = usage.get("total_tokens", total_tokens)
-
         end = time.time()
+
         latency = end - start
-        tokens_per_sec = completion_tokens / latency if latency > 0 else 0
+
+        ttft = (first_token_time - start) if first_token_time else 0
+        generation_time = (end - first_token_time) if first_token_time else 0
+
+        tokens_per_sec = (
+            completion_tokens / generation_time
+            if generation_time > 0 else 0
+        )
 
         final_payload = {
             "text": full_text,
@@ -281,9 +303,11 @@ def http_relay_stream(node: str, payload, loop: asyncio.AbstractEventLoop, strea
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
+                "ttft": ttft,
+                "generation_time": generation_time,
                 "latency": latency,
                 "tokens_per_sec": tokens_per_sec,
-            }
+            },
         }
 
         loop.call_soon_threadsafe(stream_q.put_nowait, {
