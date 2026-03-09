@@ -16,6 +16,7 @@ import app.config as cfg
 # Import monitoring router + startup hook
 from app.backend.monitoring import router as monitoring_router
 from app.backend.monitoring import start_metrics_listener
+from app.backend.monitoring import _ssh_start_monitor_agent
 
 app = FastAPI()
 templates = Jinja2Templates(directory="app/frontend")
@@ -83,7 +84,17 @@ async def startup_event():
 
     DISPATCHER_TASK = asyncio.create_task(dispatch_loop())
     print("[STARTUP] dispatch loop started", DISPATCHER_TASK)
+
     start_metrics_listener()
+
+    # Start monitoring agents so metrics are always streaming
+    tasks = [
+        loop.run_in_executor(cfg.EXECUTOR, _ssh_start_monitor_agent, node)
+        for node in cfg.NODE_POOL
+    ]
+
+    await asyncio.gather(*tasks)
+    print("[STARTUP] monitoring agents started on all nodes")
 
 
 # =============================

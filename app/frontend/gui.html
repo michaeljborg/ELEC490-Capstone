@@ -977,7 +977,7 @@
         const res = await fetch('/api/monitoring/start', { method: 'POST' });
         const data = await res.json();
         document.getElementById('monitoring-status-text').innerText =
-          data.monitoring_active ? 'Monitoring active' : 'Start failed on some nodes';
+          data.monitoring_active ? 'Started' : 'Start failed on some nodes';
         refreshMetrics();
       }
 
@@ -1153,8 +1153,8 @@
       <div class="monitoring-panel">
         <h3>Cluster Monitoring</h3>
         <div class="monitoring-controls">
-          <button onclick="startMonitoring()">Start</button>
-          <button onclick="stopMonitoring()">Stop</button>
+          <button onclick="startMonitoring()">Start Logging</button>
+          <button onclick="stopMonitoring()">Stop Logging</button>
           <span id="monitoring-status-text" class="monitoring-status">Stopped</span>
         </div>
         <div id="metrics-container" class="metrics-grid"></div>
