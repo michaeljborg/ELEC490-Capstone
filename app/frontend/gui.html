@@ -999,10 +999,21 @@
           const info = data.by_node[node];
           const latest = info && info.latest ? info.latest : null;
 
-          html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
-              if (!latest) {
-                html += '<div class="row"><span class="label">No data</span></div>';
-              } else {
+                  html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+
+                  if (!latest) {
+
+                    html += '<div class="row">'
+                          + '<span class="label">GPU Util</span><span class="value">–</span>'
+                          + '<span class="label">VRAM</span><span class="value">–</span>'
+                          + '</div>';
+
+                    html += '<div class="row">'
+                          + '<span class="label">Temp</span><span class="value">–</span>'
+                          + '<span class="label">Power</span><span class="value">–</span>'
+                          + '</div>';
+
+                  } else {
                   const gpuUtil = (latest.gpu_utilization_percent || 0).toFixed(0) + '%';
 
                   const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
