@@ -5,7 +5,9 @@ import asyncio
 import requests
 import threading
 import uuid
+import os
 
+from datetime import datetime
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -675,6 +677,38 @@ async def shutdown_event():
             print(f"Failed to stop vLLM on {node}: {e}")
 
     print("Cluster shutdown complete.")
+
+
+# =============================
+# SAVE SINGLE NODE METRICS
+# =============================
+
+@app.post("/api/save-single-node-metrics")
+async def save_single_node_metrics(request: Request):
+    try:
+        metrics = await request.json()
+
+        output_dir = os.path.join("output", "single-node")
+        os.makedirs(output_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"single_node_test_{timestamp}.json"
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+
+        return {
+            "ok": True,
+            "path": filepath
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
 
 # =============================
 # Spam 50 
