@@ -738,6 +738,16 @@
                   </div>
 
                   <div class="test-row">
+                    <span class="label">TTFT</span>
+                    <span class="value">${(m.ttft ?? 0).toFixed(3)} s</span>
+                  </div>
+
+                  <div class="test-row">
+                    <span class="label">Generation Time</span>
+                    <span class="value">${(m.generation_time ?? 0).toFixed(3)} s</span>
+                  </div>
+
+                  <div class="test-row">
                     <span class="label">Latency</span>
                     <span class="value">${m.latency.toFixed(3)} s</span>
                   </div>
@@ -746,6 +756,7 @@
                     <span class="label">Tokens/sec</span>
                     <span class="value">${m.tokens_per_sec.toFixed(2)}</span>
                   </div>
+
                 </div>
               `;
 
@@ -1158,6 +1169,16 @@
             </div>
 
             <div class="test-row">
+              <span class="label">TTFT</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
+              <span class="label">Generation Time</span>
+              <span class="value">–</span>
+            </div>
+
+            <div class="test-row">
               <span class="label">Latency</span>
               <span class="value">–</span>
             </div>
@@ -1165,6 +1186,7 @@
             <div class="test-row">
               <span class="label">Tokens/sec</span>
               <span class="value">–</span>
+            </div>
             </div>
 
           </div>
