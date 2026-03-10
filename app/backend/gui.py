@@ -6,6 +6,7 @@ import requests
 import threading
 import uuid
 import os
+import time
 
 from datetime import datetime
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -20,6 +21,9 @@ import app.config as cfg
 from app.backend.monitoring import router as monitoring_router
 from app.backend.monitoring import start_metrics_listener
 from app.backend.monitoring import _ssh_start_monitor_agent
+
+# Import bencmarking
+from app.backend.benchmark_collector import BENCHMARK
 
 app = FastAPI()
 templates = Jinja2Templates(directory="app/frontend")
@@ -205,10 +209,6 @@ async def broadcast_shared_state():
 # =============================
 # RELAY
 # =============================
-
-import time
-
-import time
 
 # # non-streaming response (NO LONGER USED)
 # def http_relay(node: str, payload):
@@ -425,6 +425,11 @@ async def dispatch_loop():
 
             node = await cfg.AVAILABLE_NODES.get()
 
+            # record dispatch time
+            dispatch_time = time.time()
+            if job_id in JOB_META:
+                JOB_META[job_id]["dispatch_time"] = dispatch_time
+
             await update_shared_state(node_updates={node: "in-use"})
 
             cfg.WAITING_FOR_NODE -= 1
@@ -442,19 +447,57 @@ async def dispatch_loop():
                     else:
                         result = await run_on_node(node, payload)
 
+                    # =============================
+                    # BENCHMARK RECORD
+                    # =============================
+
+                    if result and isinstance(result, dict):
+                        meta = JOB_META.get(job_id, {})
+
+                        metrics = result.get("metrics", {})
+
+                        enqueue_time = meta.get("enqueue_time")
+                        dispatch_time = meta.get("dispatch_time")
+
+                        queue_time = None
+                        if enqueue_time and dispatch_time:
+                            queue_time = dispatch_time - enqueue_time
+
+                        record = {
+                            "job_id": job_id,
+                            "node": node,
+                            "prompt_tokens": metrics.get("prompt_tokens", 0),
+                            "completion_tokens": metrics.get("completion_tokens", 0),
+                            "ttft": metrics.get("ttft", 0),
+                            "generation_time": metrics.get("generation_time", 0),
+                            "latency": metrics.get("latency", 0),
+                            "enqueue_time": enqueue_time,
+                            "dispatch_time": dispatch_time,
+                            "queue_time": queue_time
+                        }
+
+                        BENCHMARK.record(record)
+
                     if not fut.cancelled():
                         fut.set_result((node, result))
+
                 except Exception as e:
                     print(f"[DISPATCH] job failed on {node}: {e}")
                     if not fut.cancelled():
                         fut.set_exception(e)
+
                 finally:
                     cfg.IN_FLIGHT[node] -= 1
+
                     await update_shared_state(node_updates={node: "free"})
+
                     cfg.JOB_QUEUE.task_done()
+
                     if NODE_HEALTHY.get(node, True):
                         cfg.AVAILABLE_NODES.put_nowait(node)
+
                     await broadcast_status()
+
             asyncio.create_task(_do())
             
 
@@ -790,7 +833,7 @@ async def save_single_node_metrics(request: Request):
 async def run_benchmark(request: Request):
     data = await request.json()
     count = int(data.get("count", 50))
-    
+
     loop = asyncio.get_running_loop()
     job_ids = []
     ahead_before = cfg.JOB_QUEUE.qsize() + cfg.WAITING_FOR_NODE + sum(cfg.IN_FLIGHT.values())
@@ -798,25 +841,99 @@ async def run_benchmark(request: Request):
     # Deterministically slice the dataset
     prompts_to_run = cfg.BENCHMARK_PROMPTS[:count]
 
+    # ---------------------------
+    # START BENCHMARK COLLECTION
+    # ---------------------------
+
+    BENCHMARK.start({
+        "dataset": "oxford",
+        "num_prompts": len(prompts_to_run),
+        "batch_size": CURRENT_BATCH_SIZE,
+        "nodes": len(cfg.NODE_POOL),
+        "model": CURRENT_MODEL
+    })
+
+    # ---------------------------
+    # ENQUEUE BENCHMARK REQUESTS
+    # ---------------------------
+
     for i, p in enumerate(prompts_to_run):
+
         fut = loop.create_future()
         job_id = f"bench-{i}-{uuid.uuid4().hex}"
+
+        enqueue_time = time.time()
 
         cfg.PENDING[job_id] = fut
 
         # enable streaming (matching your updated gui.py architecture)
-        JOB_META[job_id] = {"stream": True}
+        JOB_META[job_id] = {
+            "stream": True,
+            "enqueue_time": enqueue_time
+        }
+
         STREAM_QUEUES[job_id] = asyncio.Queue()
         STREAM_DONE[job_id] = False
 
         await cfg.JOB_QUEUE.put((job_id, p, fut))
+
         job_ids.append(job_id)
 
     await broadcast_status()
+
+    # ---------------------------
+    # WAIT FOR ALL JOBS
+    # ---------------------------
+
+    for job_id in job_ids:
+        fut = cfg.PENDING.get(job_id)
+        if fut:
+            try:
+                await asyncio.wait_for(fut, timeout=300)
+            except Exception as e:
+                print(f"[BENCHMARK] job failed or timed out: {job_id}")
+
+    BENCHMARK.stop()
+
+    node_summary = BENCHMARK.summary_by_node()
+
+    total_tokens = sum(r["completion_tokens"] for r in BENCHMARK.requests)
+
+    wall_time = BENCHMARK.end_time - BENCHMARK.start_time
+
+    system_summary = {
+        "total_requests": len(BENCHMARK.requests),
+        "total_tokens": total_tokens,
+        "cluster_tokens_per_sec": total_tokens / wall_time if wall_time else 0
+    }
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    folder = os.path.join("output", "multi-node", f"test_{timestamp}")
+    os.makedirs(folder, exist_ok=True)
+
+    # Save raw requests
+    with open(os.path.join(folder, "requests_raw.json"), "w") as f:
+        json.dump(BENCHMARK.requests, f, indent=2)
+
+    # Save node summary
+    with open(os.path.join(folder, "node_summary.json"), "w") as f:
+        json.dump(node_summary, f, indent=2)
+
+    # Save system summary
+    with open(os.path.join(folder, "system_summary.json"), "w") as f:
+        json.dump(system_summary, f, indent=2)
+
+    # Save config
+    with open(os.path.join(folder, "config.json"), "w") as f:
+        json.dump(BENCHMARK.config, f, indent=2)
 
     return {
         "ok": True,
         "enqueued": len(prompts_to_run),
         "ahead_before": ahead_before,
         "job_ids": job_ids,
+        "benchmark_id": BENCHMARK.benchmark_id,
+        "node_summary": node_summary,
+        "system_summary": system_summary
     }
