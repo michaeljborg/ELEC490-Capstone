@@ -1,7 +1,0 @@
-{
-  "dataset": "oxford",
-  "num_prompts": 40,
-  "batch_size": 1,
-  "nodes": 4,
-  "model": "Qwen/Qwen2.5-1.5B-Instruct"
-}

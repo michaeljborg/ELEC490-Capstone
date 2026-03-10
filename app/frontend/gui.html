@@ -585,6 +585,29 @@
         color: var(--accent);
       }
 
+      .controls {
+        display: flex;
+        align-items: flex-end;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .control-block {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .control-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #aaa;
+        margin-bottom: 3px;
+      }
+
+      .control-select {
+        width: 210px;   /* ensures both dropdowns match */
+      }
+
     </style>
 
     <script>
@@ -1309,6 +1332,54 @@
         refreshMetrics();
       }
 
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function rgb(r, g, b) {
+      return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+    }
+
+    function gradientColor(t, c1, c2) {
+      return rgb(
+        lerp(c1[0], c2[0], t),
+        lerp(c1[1], c2[1], t),
+        lerp(c1[2], c2[2], t)
+      );
+    }
+
+    function gpuUtilColor(util) {
+      const t = Math.min(Math.max(util / 100, 0), 1);
+
+      const green = [120, 255, 120];
+      const red = [200, 0, 0];
+
+      return gradientColor(t, green, red);
+    }
+
+    function gpuTempColor(temp) {
+      const min = 35;
+      const max = 70;
+
+      if (temp <= min) return "rgb(120,255,120)";
+      if (temp >= max) return "rgb(150,0,0)";
+
+      const t = (temp - min) / (max - min);
+
+      const stops = [
+        [120,255,120],  // green
+        [255,255,120],  // yellow
+        [255,165,0],    // orange
+        [150,0,0]       // dark red
+      ];
+
+      const seg = t * (stops.length - 1);
+      const i = Math.floor(seg);
+      const localT = seg - i;
+
+      return gradientColor(localT, stops[i], stops[i + 1]);
+    }
+
       async function refreshMetrics() {
         const res = await fetch('/api/metrics');
         const data = await res.json();
@@ -1316,47 +1387,55 @@
         if (!container) return;
 
         let html = '';
+
         for (const node of NODE_POOL) {
           const info = data.by_node[node];
           const latest = info && info.latest ? info.latest : null;
 
-                  html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+          html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
 
-                  if (!latest) {
+          if (!latest) {
 
-                    html += '<div class="row">'
-                          + '<span class="label">GPU Util</span><span class="value">–</span>'
-                          + '<span class="label">VRAM</span><span class="value">–</span>'
-                          + '</div>';
+            html += '<div class="row">'
+                  + '<span class="label">GPU Util</span><span class="value">–</span>'
+                  + '<span class="label">VRAM</span><span class="value">–</span>'
+                  + '</div>';
 
-                    html += '<div class="row">'
-                          + '<span class="label">Temp</span><span class="value">–</span>'
-                          + '<span class="label">Power</span><span class="value">–</span>'
-                          + '</div>';
+            html += '<div class="row">'
+                  + '<span class="label">Temp</span><span class="value">–</span>'
+                  + '<span class="label">Power</span><span class="value">–</span>'
+                  + '</div>';
 
-                  } else {
-                  const gpuUtil = (latest.gpu_utilization_percent || 0).toFixed(0) + '%';
+          } else {
 
-                  const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
-                  const memTotal = latest.gpu_memory_total_mb ? (latest.gpu_memory_total_mb / 1024).toFixed(1) : 0;
-                  const vram = memUsed + ' / ' + memTotal + ' GB';
+            const utilVal = latest.gpu_utilization_percent || 0;
+            const gpuUtil = utilVal.toFixed(0) + '%';
+            const utilColor = gpuUtilColor(utilVal);
 
-                  const temp = latest.temperature !== undefined ? latest.temperature.toFixed(1) + '°C' : 'N/A';
+            const memUsed = latest.gpu_memory_used_mb ? (latest.gpu_memory_used_mb / 1024).toFixed(1) : 0;
+            const memTotal = latest.gpu_memory_total_mb ? (latest.gpu_memory_total_mb / 1024).toFixed(1) : 0;
+            const vram = memUsed + ' / ' + memTotal + ' GB';
 
-                  const power = latest.power_watts !== undefined ? latest.power_watts.toFixed(1) + 'W' : 'N/A';
+            const tempVal = latest.temperature !== undefined ? latest.temperature : null;
+            const temp = tempVal !== null ? tempVal.toFixed(1) + '°C' : 'N/A';
+            const tempColor = tempVal !== null ? gpuTempColor(tempVal) : "inherit";
 
-                  html += '<div class="row">'
-                        + '<span class="label">GPU Util</span><span class="value">' + gpuUtil + '</span>'
-                        + '<span class="label">VRAM</span><span class="value">' + vram + '</span>'
-                        + '</div>';
+            const power = latest.power_watts !== undefined ? latest.power_watts.toFixed(1) + 'W' : 'N/A';
 
-                  html += '<div class="row">'
-                        + '<span class="label">Temp</span><span class="value">' + temp + '</span>'
-                        + '<span class="label">Power</span><span class="value">' + power + '</span>'
-                        + '</div>';
-              }
-              html += '</div>';
+            html += '<div class="row">'
+                  + '<span class="label">GPU Util</span><span class="value" style="color:' + utilColor + '">' + gpuUtil + '</span>'
+                  + '<span class="label">VRAM</span><span class="value">' + vram + '</span>'
+                  + '</div>';
+
+            html += '<div class="row">'
+                  + '<span class="label">Temp</span><span class="value" style="color:' + tempColor + '">' + temp + '</span>'
+                  + '<span class="label">Power</span><span class="value">' + power + '</span>'
+                  + '</div>';
+          }
+
+          html += '</div>';
         }
+
         container.innerHTML = html;
       }
 
@@ -1432,32 +1511,42 @@
         <div>
           <h3>Cluster Control Panel</h3>
           <div class="controls">
+
             <label class="toggle">
               <input type="checkbox" id="enableHistory">
               Enable Chat History
             </label>
-            <select id="batch-size-select">
-              <option value="">Select Batch Size</option>
-              <option value="1">1 (No Batching)</option>
-              <option value="2">2</option>
-              <option value="4">4</option>
-              <option value="8">8</option>
-              <option value="16">16</option>
-              <option value="32">32</option>
-              <option value="64">64</option>
-              <option value="128">128</option>
-            </select>
-            <select id="model-select">
-              <option value="">Select Model</option>
-              <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
-              <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
-              <option value="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4">Llama 3.1 8B (AWQ)</option>
-              <option value="meta-llama/Llama-3.2-3B-Instruct">Llama 3.2 3B (Native)</option>
-              <option value="google/gemma-2-2b-it">Gemma 2 2B (Native)</option>
-            </select>
+
+            <div class="control-block">
+              <div class="control-label">Batching</div>
+              <select id="batch-size-select" class="control-select">
+                <option value="">Select Batch Size</option>
+                <option value="1">1 (No Batching)</option>
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="8">8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+                <option value="128">128</option>
+              </select>
+            </div>
+
+            <div class="control-block">
+              <div class="control-label">Model</div>
+              <select id="model-select" class="control-select">
+                <option value="">Select Model</option>
+                <option value="Qwen/Qwen2.5-1.5B-Instruct">Qwen 1.5B Instruct</option>
+                <option value="Qwen/Qwen2.5-7B-Instruct-AWQ">Qwen 7B AWQ</option>
+                <option value="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4">Llama 3.1 8B (AWQ)</option>
+                <option value="meta-llama/Llama-3.2-3B-Instruct">Llama 3.2 3B (Native)</option>
+                <option value="google/gemma-2-2b-it">Gemma 2 2B (Native)</option>
+              </select>
+            </div>
 
             <button onclick="startVLLMCluster()">Start vLLM</button>
             <button onclick="stopVLLMCluster()">Stop vLLM</button>
+
           </div>
 
           <div id="active-model-display" style="
