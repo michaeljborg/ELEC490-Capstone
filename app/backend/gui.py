@@ -882,16 +882,21 @@ async def run_benchmark(request: Request):
     await broadcast_status()
 
     # ---------------------------
-    # WAIT FOR ALL JOBS
+    # WAIT FOR ALL JOBS (AS THEY COMPLETE)
     # ---------------------------
+
+    futures = []
 
     for job_id in job_ids:
         fut = cfg.PENDING.get(job_id)
         if fut:
-            try:
-                await asyncio.wait_for(fut, timeout=300)
-            except Exception as e:
-                print(f"[BENCHMARK] job failed or timed out: {job_id}")
+            futures.append(fut)
+
+    for fut in asyncio.as_completed(futures):
+        try:
+            await asyncio.wait_for(fut, timeout=300)
+        except Exception as e:
+            print("[BENCHMARK] job failed or timed out")
 
     BENCHMARK.stop()
 
@@ -906,7 +911,7 @@ async def run_benchmark(request: Request):
         "total_tokens": total_tokens,
         "cluster_tokens_per_sec": total_tokens / wall_time if wall_time else 0
     }
-    
+
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     folder = os.path.join("output", "multi-node", f"test_{timestamp}")
