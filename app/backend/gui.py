@@ -901,16 +901,7 @@ async def run_benchmark(request: Request):
     BENCHMARK.stop()
 
     node_summary = BENCHMARK.summary_by_node()
-
-    total_tokens = sum(r["completion_tokens"] for r in BENCHMARK.requests)
-
-    wall_time = BENCHMARK.end_time - BENCHMARK.start_time
-
-    system_summary = {
-        "total_requests": len(BENCHMARK.requests),
-        "total_tokens": total_tokens,
-        "cluster_tokens_per_sec": total_tokens / wall_time if wall_time else 0
-    }
+    system_summary = BENCHMARK.system_summary()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 

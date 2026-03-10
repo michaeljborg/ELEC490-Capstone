@@ -968,62 +968,112 @@
         const info = await res.json();
         if (!info.ok) return addMessage("assistant", "ERROR: " + info.error, "error");
 
-        let totalPromptTokens = 0;
-        let totalCompletionTokens = 0;
-        let totalLatency = 0; 
-        let completed = 0;
+        const sys = info.system_summary;
+        const nodes = info.node_summary;
 
-        const startTime = performance.now();
-
-        const fetchPromises = info.job_ids.map(async (job_id) => {
-          try {
-            const r = await fetch("/wait/" + encodeURIComponent(job_id));
-            const data = await r.json();
-            
-            if (data.ok && data.metrics) {
-              totalPromptTokens += data.metrics.prompt_tokens;
-              totalCompletionTokens += data.metrics.completion_tokens;
-              totalLatency += data.metrics.latency;
-              completed++;
-            }
-          } catch (e) {
-            console.error("Job failed:", e);
-          }
-        });
-
-        await Promise.all(fetchPromises);
-        const endTime = performance.now();
-
-        const wallClockTimeSec = (endTime - startTime) / 1000;
-        const completionTokensPerSec = totalCompletionTokens / wallClockTimeSec; 
-
-        addMessage("assistant", `Benchmark complete: ${completed}/${info.enqueued} succeeded. Results posted to Test Output.`, "system");
+        addMessage("assistant", `Benchmark complete: ${sys.total_requests}/${info.enqueued} succeeded. Results posted to Test Output.`, "system");
 
         const html = `
-          <div class="metric-card">
-            <div class="metric-header">
-              <h4>Benchmark Results (${count} prompts)</h4>
-            </div>
-            <div class="test-row">
-              <span class="label">Wall Clock Time</span>
-              <span class="value">${wallClockTimeSec.toFixed(2)} s</span>
-            </div>
-            <div class="test-row">
-              <span class="label">Total Prompt Tokens</span>
-              <span class="value">${totalPromptTokens.toLocaleString()}</span>
-            </div>
-            <div class="test-row">
-              <span class="label">Total Comp Tokens</span>
-              <span class="value">${totalCompletionTokens.toLocaleString()}</span>
-            </div>
-            <div class="test-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
-              <span class="label" style="color: var(--accent);">Cluster Throughput</span>
-              <span class="value" style="color: var(--good);">${completionTokensPerSec.toFixed(2)} tok/sec</span>
-            </div>
-          </div>
+        <div class="metric-card">
+
+        <div class="metric-header">
+        <h4>System Benchmark (${count} prompts)</h4>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Benchmark Duration</span>
+        <span class="value">${sys.benchmark_duration.toFixed(2)} s</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Total Requests</span>
+        <span class="value">${sys.total_requests}</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Batch Size</span>
+        <span class="value">${sys.batch_size}</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Total Tokens</span>
+        <span class="value">${sys.total_tokens.toLocaleString()}</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Tokens Per Request</span>
+        <span class="value">${sys.cluster_tokens_per_sec.toFixed(2)}</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Cluster Throughput</span>
+        <span class="value">${sys.cluster_tokens_per_sec.toFixed(2)} tok/sec</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Avg Latency</span>
+        <span class="value">${sys.avg_latency.toFixed(3)} s</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Avg TTFT</span>
+        <span class="value">${sys.avg_ttft.toFixed(3)} s</span>
+        </div>
+
+        <div class="test-row">
+        <span class="label">Batch Utilization</span>
+        <span class="value">${sys.batch_utilization.toFixed(2)}</span>
+        </div>
+
+        </div>
         `;
 
         document.querySelector('[data-subview="system"]').innerHTML = html;
+
+        for (const node in nodes) {
+
+          const n = nodes[node];
+
+          const nodeHTML = `
+          <div class="metric-card">
+
+          <div class="metric-header">
+          <h4>${node.toUpperCase()} Metrics</h4>
+          </div>
+
+          <div class="test-row">
+          <span class="label">Requests</span>
+          <span class="value">${n.requests}</span>
+          </div>
+
+          <div class="test-row">
+          <span class="label">Tokens</span>
+          <span class="value">${n.completion_tokens?.toLocaleString() ?? 0}</span>
+          </div>
+
+          <div class="test-row">
+          <span class="label">Tokens/sec</span>
+          <span class="value">${n.tokens_per_sec?.toFixed(2) ?? 0}</span>
+          </div>
+
+          <div class="test-row">
+          <span class="label">Avg Latency</span>
+          <span class="value">${n.avg_latency.toFixed(3)} s</span>
+          </div>
+
+          <div class="test-row">
+          <span class="label">Avg TTFT</span>
+          <span class="value">${n.avg_ttft.toFixed(3)} s</span>
+          </div>
+
+          </div>
+          `;
+
+          const panel = document.querySelector(`[data-subview="${node}"]`);
+          if (panel) panel.innerHTML = nodeHTML;
+
+        }
+
         switchTestOutputTab("multi-node");
         switchMultiNodeSubtab("system");
       }
@@ -1583,36 +1633,70 @@
 
           <div class="tab-panel multi-node-subview active" data-subview="system">
             <div class="metric-card">
-              <h4>Inference Metrics - System</h4>
-              <div class="placeholder-text">Multi-node system-wide metrics will appear here later.</div>
+              <h4>System Benchmark</h4>
+
+              <div class="test-row"><span class="label">Benchmark Duration</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Batch Size</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Total Requests</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Total Tokens</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Tokens / Request</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Cluster Throughput</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg Latency</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg TTFT</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Batch Utilization</span><span class="value">–</span></div>
+
             </div>
           </div>
 
           <div class="tab-panel multi-node-subview" data-subview="node2">
             <div class="metric-card">
-              <h4>Inference Metrics - Node2</h4>
-              <div class="placeholder-text">Node2 multi-node metrics will appear here later.</div>
+              <h4>NODE2 Metrics</h4>
+
+              <div class="test-row"><span class="label">Requests</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Completion Tokens</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Tokens/sec</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg Latency</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg TTFT</span><span class="value">–</span></div>
+
             </div>
           </div>
 
           <div class="tab-panel multi-node-subview" data-subview="node3">
             <div class="metric-card">
-              <h4>Inference Metrics - Node3</h4>
-              <div class="placeholder-text">Node3 multi-node metrics will appear here later.</div>
+              <h4>NODE3 Metrics</h4>
+
+              <div class="test-row"><span class="label">Requests</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Completion Tokens</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Tokens/sec</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg Latency</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg TTFT</span><span class="value">–</span></div>
+
             </div>
           </div>
 
           <div class="tab-panel multi-node-subview" data-subview="node4">
             <div class="metric-card">
-              <h4>Inference Metrics - Node4</h4>
-              <div class="placeholder-text">Node4 multi-node metrics will appear here later.</div>
+              <h4>NODE4 Metrics</h4>
+
+              <div class="test-row"><span class="label">Requests</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Completion Tokens</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Tokens/sec</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg Latency</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg TTFT</span><span class="value">–</span></div>
+
             </div>
           </div>
 
           <div class="tab-panel multi-node-subview" data-subview="node5">
             <div class="metric-card">
-              <h4>Inference Metrics - Node5</h4>
-              <div class="placeholder-text">Node5 multi-node metrics will appear here later.</div>
+              <h4>NODE5 Metrics</h4>
+
+              <div class="test-row"><span class="label">Requests</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Completion Tokens</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Tokens/sec</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg Latency</span><span class="value">–</span></div>
+              <div class="test-row"><span class="label">Avg TTFT</span><span class="value">–</span></div>
+
             </div>
           </div>
         </div>
