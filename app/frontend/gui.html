@@ -1387,7 +1387,8 @@
           const info = data.by_node[node];
           const latest = info && info.latest ? info.latest : null;
 
-          html += '<div class="metric-card"><h4>' + node.toUpperCase() + '</h4>';
+          const displayName = "NODE" + (NODE_POOL.indexOf(node) + 1);
+          html += '<div class="metric-card"><h4>' + displayName + '</h4>';
 
           if (!latest) {
 
@@ -1479,7 +1480,7 @@
 
         {% for node in node_pool %}
         <div class="node-item">
-          <strong>{{ node.upper() }}:</strong>
+          <strong>NODE{{ loop.index }}:</strong>
           <span id="status-{{ node }}" class="node-pill">Free</span>
         </div>
         {% endfor %}
@@ -1693,25 +1694,25 @@
                 <button class="subtab-btn multi-node-subtab-btn"
                         data-subtab="node2"
                         onclick="switchMultiNodeSubtab('node2')">
-                  Node2
+                  Node1
                 </button>
 
                 <button class="subtab-btn multi-node-subtab-btn"
                         data-subtab="node3"
                         onclick="switchMultiNodeSubtab('node3')">
-                  Node3
+                  Node2
                 </button>
 
                 <button class="subtab-btn multi-node-subtab-btn"
                         data-subtab="node4"
                         onclick="switchMultiNodeSubtab('node4')">
-                  Node4
+                  Node3
                 </button>
 
                 <button class="subtab-btn multi-node-subtab-btn"
                         data-subtab="node5"
                         onclick="switchMultiNodeSubtab('node5')">
-                  Node5
+                  Node4
                 </button>
               </div>
 
