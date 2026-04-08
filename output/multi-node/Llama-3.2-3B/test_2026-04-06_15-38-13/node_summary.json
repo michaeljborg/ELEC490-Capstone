@@ -1,0 +1,30 @@
+{
+  "node5": {
+    "requests": 258,
+    "completion_tokens": 59212,
+    "tokens_per_sec": 49.30793811343762,
+    "avg_latency": 4.718155525451483,
+    "avg_ttft": 0.0636539431505425
+  },
+  "node2": {
+    "requests": 262,
+    "completion_tokens": 59722,
+    "tokens_per_sec": 49.419638310180076,
+    "avg_latency": 4.675746458177348,
+    "avg_ttft": 0.06327715083842969
+  },
+  "node3": {
+    "requests": 259,
+    "completion_tokens": 57651,
+    "tokens_per_sec": 48.174330045043405,
+    "avg_latency": 4.693204577825244,
+    "avg_ttft": 0.07267880439758301
+  },
+  "node4": {
+    "requests": 221,
+    "completion_tokens": 57707,
+    "tokens_per_sec": 48.3394198994825,
+    "avg_latency": 5.477059265067674,
+    "avg_ttft": 0.07530542520376352
+  }
+}

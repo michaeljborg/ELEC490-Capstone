@@ -1,0 +1,11 @@
+{
+  "node": "node4",
+  "prompt_tokens": 40,
+  "completion_tokens": 430,
+  "total_tokens": 470,
+  "ttft": 0.03974199295043945,
+  "generation_time": 5.6688807010650635,
+  "latency": 5.708622694015503,
+  "tokens_per_sec": 75.85271637824589,
+  "timestamp": "2026-04-06T22:30:06.769Z"
+}

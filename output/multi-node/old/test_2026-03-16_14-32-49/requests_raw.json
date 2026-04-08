@@ -1,0 +1,26 @@
+[
+  {
+    "job_id": "bench-2-fd551ff293fc4640a3fef4e044f9c22d",
+    "node": "node4",
+    "prompt_tokens": 16,
+    "completion_tokens": 456,
+    "ttft": 0.03173494338989258,
+    "generation_time": 6.88123083114624,
+    "latency": 6.912965774536133,
+    "enqueue_time": 1773685960.4923918,
+    "dispatch_time": 1773685960.4953928,
+    "queue_time": 0.003000974655151367
+  },
+  {
+    "job_id": "bench-3-b8528e1484d44a1abb4bd900273c3b2c",
+    "node": "node5",
+    "prompt_tokens": 16,
+    "completion_tokens": 639,
+    "ttft": 0.03229331970214844,
+    "generation_time": 9.460226774215698,
+    "latency": 9.492520093917847,
+    "enqueue_time": 1773685960.4923983,
+    "dispatch_time": 1773685960.4956138,
+    "queue_time": 0.0032155513763427734
+  }
+]

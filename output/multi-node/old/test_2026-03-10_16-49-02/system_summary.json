@@ -1,0 +1,11 @@
+{
+  "benchmark_duration": 54.60281991958618,
+  "batch_size": 1,
+  "total_requests": 50,
+  "total_tokens": 14177,
+  "tokens_per_request": 283.54,
+  "cluster_tokens_per_sec": 259.6386051284262,
+  "avg_latency": 3.7982777690887453,
+  "avg_ttft": 0.1041719675064087,
+  "batch_utilization": 0.9615384615384616
+}

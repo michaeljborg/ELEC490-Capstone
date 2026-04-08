@@ -1,5 +1,1 @@
 __pycache__/
-monitor/log/*
-monitor/logs/*
-output/multi-node/*
-output/single-node/*

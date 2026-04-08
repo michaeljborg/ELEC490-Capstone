@@ -1,0 +1,7 @@
+{
+  "dataset": "oxford",
+  "num_prompts": 50,
+  "batch_size": 1,
+  "nodes": 4,
+  "model": "google/gemma-2-2b-it"
+}

@@ -1,0 +1,16 @@
+{
+  "node4": {
+    "requests": 1,
+    "completion_tokens": 456,
+    "tokens_per_sec": 66.26721457097841,
+    "avg_latency": 6.912965774536133,
+    "avg_ttft": 0.03173494338989258
+  },
+  "node5": {
+    "requests": 1,
+    "completion_tokens": 639,
+    "tokens_per_sec": 67.54594950531472,
+    "avg_latency": 9.492520093917847,
+    "avg_ttft": 0.03229331970214844
+  }
+}

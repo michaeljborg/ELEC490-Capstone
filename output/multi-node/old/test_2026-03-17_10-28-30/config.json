@@ -1,0 +1,7 @@
+{
+  "dataset": "oxford",
+  "num_prompts": 50,
+  "batch_size": 8,
+  "nodes": 4,
+  "model": "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
+}
