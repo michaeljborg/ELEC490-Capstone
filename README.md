@@ -1,5 +1,6 @@
 # ELEC490 - Capstone - Cluster Computing Project
 
+LLM inference cluster across five consumer GPUs, studying how batching, memory, and network bandwidth shape performance. It is a hands-on look at where local AI systems can scale and hit their physical limits.
 ---
 ### Cluster Info
 6 Alienware PCs  
